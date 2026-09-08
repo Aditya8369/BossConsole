@@ -519,14 +519,9 @@ internal fun CrashReportDialog(
                                 // exception message and stack trace through the same function
                                 // before they reach CrashReport.
                                 //
-                                // Scope, measured rather than assumed: a host is removed when it
-                                // appears *inside a URL* — filePathPattern swallows everything after
-                                // the scheme colon, which covers ktor's `[url=…]` messages. A bare
-                                // host does not match any location pattern and renders verbatim:
-                                // UnknownHostException.getMessage() is just the hostname, so
-                                // "Failed to submit crash report: proxy.corp.internal" survives
-                                // intact. Harmless for our own public endpoint, not necessarily so
-                                // for a corporate proxy — see #109.
+                                // The shared sanitizer also masks selected bare hostnames. Its
+                                // conservative pattern does not cover every DNS spelling or every
+                                // URL query value; see #109 for the remaining coverage limits.
                                 //
                                 // Cost of what it does remove: the endpoint is no longer named
                                 // here, only in the log. The diagnostic half survives ("Request
