@@ -11,6 +11,12 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.arkivanov.essenty.lifecycle.destroy
 import com.arkivanov.essenty.lifecycle.resume
 
+/**
+ * Owns one independent Decompose context per cached panel, rather than sharing the window's.
+ * Each context gets its own StateKeeper (isolated keys), lifecycle-bound InstanceKeeper and
+ * standalone BackDispatcher. Back callbacks are not connected to the window dispatcher.
+ * These are the same default context services used by tabs; hiding a panel does not remove it.
+ */
 class PanelComponentStore(
     private val registry: PanelRegistry,
 ) {
@@ -127,6 +133,8 @@ class PanelComponentStore(
     private fun createComponent(panelId: PanelId): PanelComponentWithUI? {
         // A factory can register cleanup and then throw before returning a component.
         // CREATED makes that partial instance destroyable even if it never reaches resume().
+        // Essenty replays onCreate synchronously when a subscriber is registered at CREATED,
+        // including doOnCreate in a factory; it is not deferred until the factory returns.
         val lifecycle = LifecycleRegistry(Lifecycle.State.CREATED)
         try {
             val component =

@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.Lifecycle
+import com.arkivanov.essenty.lifecycle.doOnCreate
 import com.arkivanov.essenty.lifecycle.doOnDestroy
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -472,5 +473,30 @@ class PanelComponentStoreResetTest {
         assertTrue(store.resetComponent(id))
         assertEquals(listOf("save", "destroy-old", "create-new", "initialize-new"), events)
         store.dispose()
+    }
+
+    @Test
+    fun `created lifecycle replays onCreate during construction exactly once`() {
+        val registry = PanelRegistry()
+        val id = PanelId("create-replay", 1)
+        val events = mutableListOf<String>()
+        registry.registerPanel(panelInfo(id)) { ctx, info ->
+            ctx.lifecycle.doOnCreate { events += "create" }
+            events += "factory"
+            FakePanelComponent(
+                info,
+                ctx,
+                generation = 1,
+                onDestroyAction = { events += "destroy" },
+            )
+        }
+        val store = PanelComponentStore(registry)
+        val component = store.getOrCreateComponent(id) as FakePanelComponent
+
+        assertEquals(listOf("create", "factory"), events)
+        assertEquals(Lifecycle.State.RESUMED, component.lifecycle.state)
+        store.removeComponent(id)
+        store.dispose()
+        assertEquals(listOf("create", "factory", "destroy"), events)
     }
 }

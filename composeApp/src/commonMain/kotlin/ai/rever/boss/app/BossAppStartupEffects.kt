@@ -434,7 +434,7 @@ internal fun BossAppStartupEffects(state: BossAppState) {
             // Keep these calls in the SAME disposal callback. Compose forgets sibling
             // effects in reverse order, so the earlier store effect runs after this one.
             // Panels must release resources before this window's plugin classloaders close,
-            // including if the plugin effect is ever recreated. Store disposal is idempotent.
+            // during window teardown. Store disposal is idempotent.
             state.panelComponentStore.dispose()
             // Cleanup plugin coroutines
             plugin.dispose()
@@ -446,7 +446,6 @@ internal fun BossAppStartupEffects(state: BossAppState) {
 
             // Unregister this window's state from the global registries
             SplitViewStateRegistry.unregister(windowId)
-            PanelComponentStoreRegistry.unregister(windowId)
             WindowProjectStateRegistry.unregister(windowId)
             WindowRunnerStateRegistry.unregister(windowId)
             WindowGitStateRegistry.unregister(windowId)
