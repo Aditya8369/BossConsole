@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.Lifecycle
+import com.arkivanov.essenty.lifecycle.doOnDestroy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -327,5 +328,40 @@ class PanelComponentStoreResetTest {
             PanelComponentStoreRegistry.unregister("tracks-window-b")
         }
         assertFalse(PanelComponentStoreRegistry.getAllStores().contains(storeA))
+    }
+
+    @Test
+    fun `closing one panel does not fire doOnDestroy on another`() {
+        val registry = PanelRegistry()
+        val idA = PanelId("lifecycle-iso-a", 1)
+        val idB = PanelId("lifecycle-iso-b", 2)
+        var destroyA = false
+        var destroyB = false
+        registry.registerPanel(panelInfo(idA)) { ctx, info ->
+            object : PanelComponentWithUI, ComponentContext by ctx {
+                override val panelInfo = info
+                init { lifecycle.doOnDestroy { destroyA = true } }
+
+                @Composable
+                override fun Content() {}
+            }
+        }
+        registry.registerPanel(panelInfo(idB)) { ctx, info ->
+            object : PanelComponentWithUI, ComponentContext by ctx {
+                override val panelInfo = info
+                init { lifecycle.doOnDestroy { destroyB = true } }
+
+                @Composable
+                override fun Content() {}
+            }
+        }
+        val store = PanelComponentStore(registry)
+        store.getOrCreateComponent(idA)
+        store.getOrCreateComponent(idB)
+
+        store.removeComponent(idA)
+
+        assertTrue(destroyA, "the closed panel's doOnDestroy must fire")
+        assertFalse(destroyB, "a sibling panel's lifecycle must be unaffected")
     }
 }
