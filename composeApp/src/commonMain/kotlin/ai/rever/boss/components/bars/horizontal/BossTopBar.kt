@@ -789,7 +789,6 @@ fun BossDraggableComponent.BossTopLeftBar(
     }
 }
 
-
 @Composable
 fun BossTopRightBar(
     onShowSettings: (() -> Unit)? = null,
