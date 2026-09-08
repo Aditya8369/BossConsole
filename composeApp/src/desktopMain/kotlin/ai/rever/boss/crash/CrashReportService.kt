@@ -5,7 +5,6 @@ import ai.rever.boss.config.SupabaseClientConfig
 import ai.rever.boss.utils.AppVersion
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
-import ai.rever.boss.utils.logging.LogSanitizer
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
@@ -78,23 +77,9 @@ object CrashReportService {
             val isNewIssue: Boolean,
         ) : SubmitResult()
 
-        @ConsistentCopyVisibility
-        data class Error private constructor(
+        data class Error(
             val message: String,
-        ) : SubmitResult() {
-            companion object {
-                /**
-                 * The only way to build an [Error] (BossConsole#110). #107 sanitized this
-                 * string at exactly one place - the `Text` in [CrashReportDialog]'s
-                 * submit-result card - which meant safety was call-site discipline, not a
-                 * property of the type: the next consumer (a copy button, a toast, a log
-                 * line) would have started from the same raw string and had to remember
-                 * independently. Routing every construction through here instead makes the
-                 * type itself honest, regardless of which caller builds it next.
-                 */
-                fun of(rawMessage: String): Error = Error(LogSanitizer.sanitizeExceptionMessage(rawMessage))
-            }
-        }
+        ) : SubmitResult()
     }
 
     /**
@@ -141,7 +126,7 @@ object CrashReportService {
                 }
             } catch (e: Exception) {
                 logger.error(LogCategory.NETWORK, "Failed to submit crash report", error = e)
-                SubmitResult.Error.of("Failed to submit: ${e.message ?: "Unknown error"}")
+                SubmitResult.Error("Failed to submit: ${e.message ?: "Unknown error"}")
             }
         }
 
@@ -218,7 +203,7 @@ object CrashReportService {
                         ),
                     )
                     ProxyResult.Done(
-                        SubmitResult.Error.of(
+                        SubmitResult.Error(
                             "Crash report was rejected (HTTP $status). Please try again later.",
                         ),
                     )
@@ -234,7 +219,7 @@ object CrashReportService {
                         ),
                     )
                     ProxyResult.FallbackWorthy(
-                        SubmitResult.Error.of(
+                        SubmitResult.Error(
                             "Failed to submit crash report (HTTP $status). Please try again later.",
                         ),
                     )
@@ -243,7 +228,7 @@ object CrashReportService {
         } catch (e: Exception) {
             logger.error(LogCategory.NETWORK, "Crash report proxy unreachable", error = e)
             ProxyResult.FallbackWorthy(
-                SubmitResult.Error.of(
+                SubmitResult.Error(
                     "Failed to submit crash report: ${e.message ?: "network error"}",
                 ),
             )
@@ -322,11 +307,11 @@ object CrashReportService {
             }
 
             response.status.value == 401 -> {
-                SubmitResult.Error.of("GitHub authentication failed. Token may be invalid or expired.")
+                SubmitResult.Error("GitHub authentication failed. Token may be invalid or expired.")
             }
 
             response.status.value == 403 -> {
-                SubmitResult.Error.of("Permission denied. Token may lack 'repo' scope.")
+                SubmitResult.Error("Permission denied. Token may lack 'repo' scope.")
             }
 
             else -> {
@@ -339,7 +324,7 @@ object CrashReportService {
                         "error" to errorBody.take(200),
                     ),
                 )
-                SubmitResult.Error.of("Failed to create issue (HTTP ${response.status.value})")
+                SubmitResult.Error("Failed to create issue (HTTP ${response.status.value})")
             }
         }
     }
@@ -386,7 +371,7 @@ object CrashReportService {
             }
 
             else -> {
-                SubmitResult.Error.of("Failed to add comment (HTTP ${response.status.value})")
+                SubmitResult.Error("Failed to add comment (HTTP ${response.status.value})")
             }
         }
     }

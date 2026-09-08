@@ -279,7 +279,7 @@ class CrashReportDialogLayoutTest {
         // pinned footer, and CrashReportService interpolates e.message into it, which a TLS or
         // proxy failure can make arbitrarily long. maxLines caps it; this is that cap's guard.
         setDialogAtMinimumWindowSize(
-            CrashReportService.SubmitResult.Error.of("Failed to submit crash report: " + "boom ".repeat(1000)),
+            CrashReportService.SubmitResult.Error("Failed to submit crash report: " + "boom ".repeat(1000)),
         )
 
         rule.onNodeWithText("Technical Details").performClick()
@@ -322,7 +322,7 @@ class CrashReportDialogLayoutTest {
         // only redacts named params inside a `?`/`#` segment, so it returned a ktor timeout message
         // carrying the request URL completely untouched.
         setDialogAtMinimumWindowSize(
-            CrashReportService.SubmitResult.Error.of(
+            CrashReportService.SubmitResult.Error(
                 "Failed to submit crash report: Request timeout has expired " +
                     "[url=https://api.risaboss.com/functions/v1/crash-report, request_timeout=15000 ms]",
             ),
@@ -445,7 +445,7 @@ class CrashReportDialogLayoutTest {
         // Unreachable today (every Error interpolates a prefix), but it is the one behaviour the
         // sanitizer swap changed beyond redaction: maskUriParams answered "[empty]" for blank input,
         // sanitizeExceptionMessage answers "[no message]".
-        setDialogAtMinimumWindowSize(CrashReportService.SubmitResult.Error.of(""))
+        setDialogAtMinimumWindowSize(CrashReportService.SubmitResult.Error(""))
 
         rule.onNodeWithText("[no message]", substring = true).assertExists()
     }
