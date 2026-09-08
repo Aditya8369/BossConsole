@@ -3,7 +3,6 @@ package ai.rever.boss.crash
 import ai.rever.boss.plugin.ui.BossTheme
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
-import ai.rever.boss.utils.logging.LogSanitizer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -510,33 +509,16 @@ internal fun CrashReportDialog(
                             }
 
                             is CrashReportService.SubmitResult.Error -> {
-                                // The text most likely to end up pasted into a public issue, and it
-                                // interpolates a raw exception message.
-                                //
-                                // sanitizeExceptionMessage, not maskUriParams: the latter redacts
-                                // named params inside a `?`/`#` segment, and the case that
-                                // motivates sanitizing here has neither — "Request timeout has
-                                // expired [url=https://…, …]" passed through verbatim. This is also
-                                // what the rest of the window already gets: CrashHandler runs the
-                                // exception message and stack trace through the same function
-                                // before they reach CrashReport.
-                                //
-                                // Scope, measured rather than assumed: a host is removed when it
-                                // appears *inside a URL* — filePathPattern swallows everything after
-                                // the scheme colon, which covers ktor's `[url=…]` messages. A bare
-                                // host does not match any location pattern and renders verbatim:
-                                // UnknownHostException.getMessage() is just the hostname, so
-                                // "Failed to submit crash report: proxy.corp.internal" survives
-                                // intact. Harmless for our own public endpoint, not necessarily so
-                                // for a corporate proxy — see #109.
-                                //
-                                // Cost of what it does remove: the endpoint is no longer named
-                                // here, only in the log. The diagnostic half survives ("Request
-                                // timeout has expired", and request_timeout=… since neither
-                                // `request` nor `timeout` marks a secret), which keeps this
-                                // narrower than a blunt redaction. A blank message renders
-                                // "[no message]" where maskUriParams gave "[empty]".
-                                LogSanitizer.sanitizeExceptionMessage(result.message)
+                                // The text most likely to end up pasted into a public issue. #107
+                                // sanitized it here, at this one render site; #110 moved that
+                                // guarantee onto the type itself — every SubmitResult.Error is built
+                                // through Error.of(), which sanitizes before the raw string can ever
+                                // reach .message, so a second call here is no longer this call
+                                // site's job. See LogSanitizer.sanitizeExceptionMessage for what is
+                                // and is not removed (paths, URLs, emails, bare hostnames since #109,
+                                // credential-shaped runs) and CrashReportService.SubmitResult.Error
+                                // for why the type, not the call site, now owns this.
+                                result.message
                             }
                         }
                     }
@@ -608,7 +590,7 @@ internal fun CrashReportDialog(
                             ).also { submitResult = it }
                         } catch (e: Exception) {
                             submitResult =
-                                CrashReportService.SubmitResult.Error(
+                                CrashReportService.SubmitResult.Error.of(
                                     "Failed to submit crash report: ${e.message ?: e.javaClass.simpleName}",
                                 )
                             null
@@ -735,7 +717,7 @@ private suspend fun submitReport(
 ): CrashReportService.SubmitResult {
     val updated =
         CrashHandler.updateReportWithUserInput(userNotes = userNotes, includeLogs = includeLogs)
-            ?: return CrashReportService.SubmitResult.Error("Failed to prepare report")
+            ?: return CrashReportService.SubmitResult.Error.of("Failed to prepare report")
     return CrashReportService.submitCrashReport(updated)
 }
 

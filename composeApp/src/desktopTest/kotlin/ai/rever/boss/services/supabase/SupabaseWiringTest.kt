@@ -50,7 +50,10 @@ class SupabaseWiringTest {
          *
          *  - the sanitised forms themselves, including the `safe` local that
          *    `SupabaseDataProviderImpl` sanitises once and uses for both the log and the
-         *    returned message;
+         *    returned message; `SecretService` (BossConsole#145) does the same but passes
+         *    `safe` straight to `Result.failure` rather than re-wrapping `safe.message` in a
+         *    new `Exception`, which is a second legitimate shape of the same "sanitize once"
+         *    rule, not a second rule;
          *  - the declaration of `supabaseJson`, which is necessarily a `Json { }`;
          *  - `validate().getOrElse { return Result.failure(it) }`, which returns an
          *    `IllegalArgumentException` this code constructed from the caller's own request.
@@ -61,7 +64,7 @@ class SupabaseWiringTest {
          */
         val ALLOWED =
             Regex(
-                """sanitizeSupabaseFailure\(|error = safe|\$\{safe\.message\}|""" +
+                """sanitizeSupabaseFailure\(|error = safe|\$\{safe\.message\}|Result\.failure\(safe\)|""" +
                     """val supabaseJson = Json|validate\(\)\.getOrElse""",
             )
     }
@@ -135,12 +138,16 @@ class SupabaseWiringTest {
     @Test
     fun `every SecretService catch block is sanitised`() {
         // Derived from the number of catch blocks rather than hardcoded, so deleting a method
-        // cannot quietly satisfy the assertion.
+        // cannot quietly satisfy the assertion. Counts calls to sanitizeSupabaseFailure(, not
+        // the single-line `Result.failure(sanitizeSupabaseFailure(` shape specifically - since
+        // #145 added a BossLogger call to every catch, each now sanitizes once into a `safe`
+        // local and reuses it for both the log and the returned Result, the same "sanitize
+        // once" shape SupabaseDataProviderImpl already uses (see SupabaseWiringTest's ALLOWED).
         val source = File(sourceDir(), "SecretService.kt").readText()
         val catches = Regex("""catch \(e: Exception\)""").findAll(source).count()
-        val sanitised = Regex("""Result\.failure\(sanitizeSupabaseFailure\(""").findAll(source).count()
+        val sanitised = Regex("""sanitizeSupabaseFailure\(""").findAll(source).count()
 
         assertTrue(catches > 0, "found no catch blocks - has the file moved?")
-        assertEquals(catches, sanitised, "$catches catch blocks but $sanitised sanitised returns")
+        assertEquals(catches, sanitised, "$catches catch blocks but $sanitised sanitised calls")
     }
 }
