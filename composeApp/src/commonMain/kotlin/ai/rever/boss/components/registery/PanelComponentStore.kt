@@ -6,6 +6,7 @@ import ai.rever.boss.utils.logging.LogCategory
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import com.arkivanov.decompose.DefaultComponentContext
+import com.arkivanov.essenty.lifecycle.Lifecycle
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.arkivanov.essenty.lifecycle.destroy
 import com.arkivanov.essenty.lifecycle.resume
@@ -124,18 +125,28 @@ class PanelComponentStore(
     }
 
     private fun createComponent(panelId: PanelId): PanelComponentWithUI? {
-        val lifecycle = LifecycleRegistry()
-        val component =
-            registry.createComponent(
-                panelId,
-                DefaultComponentContext(lifecycle),
-            ) ?: return null
+        // A factory can register cleanup and then throw before returning a component.
+        // CREATED makes that partial instance destroyable even if it never reaches resume().
+        val lifecycle = LifecycleRegistry(Lifecycle.State.CREATED)
+        try {
+            val component =
+                registry.createComponent(
+                    panelId,
+                    DefaultComponentContext(lifecycle),
+                )
+            if (component == null) {
+                destroyLifecycle(panelId, lifecycle)
+                return null
+            }
 
-        // LifecycleRegistry starts below CREATED. Advancing it ensures that
-        // destroy() delivers onDestroy to the component's subscribers.
-        lifecycle.resume()
-        panelLifecycles[panelId] = lifecycle
-        return component
+            lifecycle.resume()
+            panelLifecycles[panelId] = lifecycle
+            return component
+        } catch (t: Throwable) {
+            // Covers both factory failure and lifecycle up-callbacks throwing in resume().
+            destroyLifecycle(panelId, lifecycle)
+            throw t
+        }
     }
 
     private fun destroyLifecycle(
@@ -144,15 +155,22 @@ class PanelComponentStore(
     ) {
         if (lifecycle == null) return
 
-        try {
-            lifecycle.destroy()
-        } catch (t: Throwable) {
-            logger.warn(
-                LogCategory.UI,
-                "Panel lifecycle destroy failed (continuing)",
-                mapOf("panelId" to panelId.panelId),
-                t,
-            )
+        // Essenty advances state before dispatching callbacks. A failing onPause/onStop
+        // interrupts destroy() before onDestroy, so continue from the advanced state.
+        // A failure in onDestroy itself is terminal; do not redeliver that event.
+        while (lifecycle.state != Lifecycle.State.DESTROYED) {
+            val previousState = lifecycle.state
+            try {
+                lifecycle.destroy()
+            } catch (t: Throwable) {
+                logger.warn(
+                    LogCategory.UI,
+                    "Panel lifecycle destroy failed (continuing)",
+                    mapOf("panelId" to panelId.panelId),
+                    t,
+                )
+            }
+            if (lifecycle.state == previousState) return
         }
     }
 }

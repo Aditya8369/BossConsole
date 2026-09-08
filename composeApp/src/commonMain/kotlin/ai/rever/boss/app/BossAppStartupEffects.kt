@@ -431,6 +431,11 @@ internal fun BossAppStartupEffects(state: BossAppState) {
             // NOTE: the "Last Session" write is NOT here. It is app-level, not
             // per-window (#19), and lives in the windowId-keyed lifecycle effect
             // above via LastSessionCoordinator.
+            // Keep these calls in the SAME disposal callback. Compose forgets sibling
+            // effects in reverse order, so the earlier store effect runs after this one.
+            // Panels must release resources before this window's plugin classloaders close,
+            // including if the plugin effect is ever recreated. Store disposal is idempotent.
+            state.panelComponentStore.dispose()
             // Cleanup plugin coroutines
             plugin.dispose()
             // NOTE: the updater is NOT torn down here. It is process-wide; the

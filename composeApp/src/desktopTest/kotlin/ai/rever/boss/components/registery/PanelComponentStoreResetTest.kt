@@ -13,6 +13,7 @@ import com.arkivanov.essenty.lifecycle.Lifecycle
 import com.arkivanov.essenty.lifecycle.doOnDestroy
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -340,19 +341,25 @@ class PanelComponentStoreResetTest {
         registry.registerPanel(panelInfo(idA)) { ctx, info ->
             object : PanelComponentWithUI, ComponentContext by ctx {
                 override val panelInfo = info
-                init { lifecycle.doOnDestroy { destroyA = true } }
+
+                init {
+                    lifecycle.doOnDestroy { destroyA = true }
+                }
 
                 @Composable
-                override fun Content() {}
+                override fun Content() = Unit
             }
         }
         registry.registerPanel(panelInfo(idB)) { ctx, info ->
             object : PanelComponentWithUI, ComponentContext by ctx {
                 override val panelInfo = info
-                init { lifecycle.doOnDestroy { destroyB = true } }
+
+                init {
+                    lifecycle.doOnDestroy { destroyB = true }
+                }
 
                 @Composable
-                override fun Content() {}
+                override fun Content() = Unit
             }
         }
         val store = PanelComponentStore(registry)
@@ -363,5 +370,107 @@ class PanelComponentStoreResetTest {
 
         assertTrue(destroyA, "the closed panel's doOnDestroy must fire")
         assertFalse(destroyB, "a sibling panel's lifecycle must be unaffected")
+    }
+
+    @Test
+    fun `factory failure destroys its partial lifecycle and permits retry`() {
+        val registry = PanelRegistry()
+        val id = PanelId("factory-failure", 1)
+        var destroyed = 0
+        registry.registerPanel(panelInfo(id)) { ctx, _ ->
+            ctx.lifecycle.doOnDestroy { destroyed++ }
+            throw NoClassDefFoundError("factory failed after allocating resources")
+        }
+        val store = PanelComponentStore(registry)
+
+        assertFailsWith<NoClassDefFoundError> { store.getOrCreateComponent(id) }
+        assertEquals(1, destroyed)
+        assertTrue(store.activeComponents.isEmpty())
+        registerFactory(registry, id, generation = 2)
+        val replacement = store.getOrCreateComponent(id) as FakePanelComponent
+        store.dispose()
+        assertEquals(1, replacement.destroyCount)
+        assertEquals(1, destroyed)
+    }
+
+    @Test
+    fun `reset destroys a replacement whose resume callback throws`() {
+        val registry = PanelRegistry()
+        val id = PanelId("resume-failure", 1)
+        registerFactory(registry, id, generation = 1)
+        val store = PanelComponentStore(registry)
+        val old = store.getOrCreateComponent(id) as FakePanelComponent
+        lateinit var replacement: FakePanelComponent
+        registry.registerPanel(panelInfo(id)) { ctx, info ->
+            FakePanelComponent(info, ctx, generation = 2).also {
+                replacement = it
+                ctx.lifecycle.subscribe(
+                    object : Lifecycle.Callbacks {
+                        override fun onResume(): Unit = throw NoClassDefFoundError("resume failed")
+                    },
+                )
+            }
+        }
+
+        assertFalse(store.resetComponent(id))
+        assertEquals(1, old.destroyCount)
+        assertEquals(1, replacement.destroyCount)
+        assertTrue(store.activeComponents.isEmpty())
+        store.dispose()
+        assertEquals(1, replacement.destroyCount)
+    }
+
+    @Test
+    fun `pause and stop failures do not prevent final destruction`() {
+        val registry = PanelRegistry()
+        val id = PanelId("downward-failure", 1)
+        registry.registerPanel(panelInfo(id)) { ctx, info ->
+            FakePanelComponent(info, ctx, generation = 1).also {
+                ctx.lifecycle.subscribe(
+                    object : Lifecycle.Callbacks {
+                        override fun onPause(): Unit = throw NoClassDefFoundError("pause failed")
+
+                        override fun onStop(): Unit = throw NoClassDefFoundError("stop failed")
+                    },
+                )
+            }
+        }
+        val store = PanelComponentStore(registry)
+        val component = store.getOrCreateComponent(id) as FakePanelComponent
+
+        store.removeComponent(id)
+        assertEquals(1, component.destroyCount)
+        assertEquals(Lifecycle.State.DESTROYED, component.lifecycle.state)
+        store.dispose()
+        assertEquals(1, component.destroyCount)
+    }
+
+    @Test
+    fun `reset saves state before destroying the old lifecycle and initializing the replacement`() {
+        val registry = PanelRegistry()
+        val id = PanelId("ordered-reset", 1)
+        val events = mutableListOf<String>()
+        registerFactory(
+            registry,
+            id,
+            generation = 1,
+            onBeforeReset = { events += "save" },
+            onDestroy = { events += "destroy-old" },
+        )
+        val store = PanelComponentStore(registry)
+        store.getOrCreateComponent(id)
+        registry.registerPanel(panelInfo(id)) { ctx, info ->
+            events += "create-new"
+            FakePanelComponent(
+                info,
+                ctx,
+                generation = 2,
+                onInitializedAction = { events += "initialize-new" },
+            )
+        }
+
+        assertTrue(store.resetComponent(id))
+        assertEquals(listOf("save", "destroy-old", "create-new", "initialize-new"), events)
+        store.dispose()
     }
 }
