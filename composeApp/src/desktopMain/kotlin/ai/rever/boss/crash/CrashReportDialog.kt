@@ -494,10 +494,8 @@ internal fun CrashReportDialog(
 
             // Submit result message
             submitResult?.let { result ->
-                // Keyed on the result, not recomputed per composition: userNotes is read in this
-                // same restartable scope, so every keystroke in the notes field recomposes the
-                // whole dialog — and this runs several regex passes over a string a TLS or proxy
-                // error can make arbitrarily long.
+                // Keep the display text keyed to the result while edits to userNotes recompose
+                // this scope. Error messages already passed through the sanitizer at construction.
                 val resultMessage =
                     remember(result) {
                         when (result) {
@@ -510,8 +508,8 @@ internal fun CrashReportDialog(
                             }
 
                             is CrashReportService.SubmitResult.Error -> {
-                                // The text most likely to end up pasted into a public issue, and it
-                                // interpolates a raw exception message.
+                                // SubmitResult.Error sanitizes its message at construction time via
+                                // LogSanitizer.sanitizeExceptionMessage.
                                 //
                                 // sanitizeExceptionMessage, not maskUriParams: the latter redacts
                                 // named params inside a `?`/`#` segment, and the case that
@@ -536,7 +534,7 @@ internal fun CrashReportDialog(
                                 // `request` nor `timeout` marks a secret), which keeps this
                                 // narrower than a blunt redaction. A blank message renders
                                 // "[no message]" where maskUriParams gave "[empty]".
-                                LogSanitizer.sanitizeExceptionMessage(result.message)
+                                result.message
                             }
                         }
                     }
@@ -607,6 +605,11 @@ internal fun CrashReportDialog(
                                 includeLogs = includeLogs,
                             ).also { submitResult = it }
                         } catch (e: Exception) {
+                            BossLogger.forComponent("CrashReportDialog").error(
+                                LogCategory.SYSTEM,
+                                "Crash report submission threw",
+                                error = e,
+                            )
                             submitResult =
                                 CrashReportService.SubmitResult.Error(
                                     "Failed to submit crash report: ${e.message ?: e.javaClass.simpleName}",
