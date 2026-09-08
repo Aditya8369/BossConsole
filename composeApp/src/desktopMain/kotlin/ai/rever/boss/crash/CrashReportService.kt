@@ -78,6 +78,11 @@ object CrashReportService {
             val isNewIssue: Boolean,
         ) : SubmitResult()
 
+        /**
+         * #110: the private constructor and companion factory sanitize every public construction.
+         * Keep copy visibility aligned with the constructor so copy cannot introduce a raw message.
+         * CrashReportServiceTest pins both entry points as private in compiled bytecode.
+         */
         @ConsistentCopyVisibility
         data class Error private constructor(
             val message: String,

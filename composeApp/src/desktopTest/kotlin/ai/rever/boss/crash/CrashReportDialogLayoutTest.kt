@@ -317,8 +317,8 @@ class CrashReportDialogLayoutTest {
 
     @Test
     fun aSubmitFailureIsSanitizedBeforeItIsShown() {
-        // This card is selectable and the likeliest thing to be pasted into a public issue, and its
-        // text interpolates a raw exception message. maskUriParams — which this originally used —
+        // This selectable card is likely to be pasted into a public issue, so verify the rendered
+        // message stays sanitized. maskUriParams, which the original render site used,
         // only redacts named params inside a `?`/`#` segment, so it returned a ktor timeout message
         // carrying the request URL completely untouched.
         setDialogAtMinimumWindowSize(
@@ -338,27 +338,6 @@ class CrashReportDialogLayoutTest {
         // has a space. Not "crash-report]": the fixture has a comma there, so that literal appears
         // nowhere in the input and the assertion could never fail.
         rule.onNodeWithText("crash-report", substring = true).assertDoesNotExist()
-    }
-
-    @Test
-    fun submitResultErrorSanitizesAtConstruction() {
-        val raw =
-            "Failed to submit crash report: Request timeout has expired " +
-                "[url=https://api.risaboss.com/functions/v1/crash-report, request_timeout=15000 ms]"
-        val error = CrashReportService.SubmitResult.Error(raw)
-
-        kotlin.test.assertTrue(
-            error.message.contains("Request timeout has expired"),
-            "Error.message should retain non-sensitive diagnostic text",
-        )
-        kotlin.test.assertFalse(
-            error.message.contains("api.risaboss.com"),
-            "Error.message must sanitize URL hosts at construction time",
-        )
-        kotlin.test.assertFalse(
-            error.message.contains("crash-report"),
-            "Error.message must sanitize URL paths at construction time",
-        )
     }
 
     @Test
