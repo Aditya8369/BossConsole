@@ -47,14 +47,14 @@ class ContextMenuProviderProxy(
         val labels = items.map { it.label }
         LaunchedEffect(labels) {
             try {
-                    val protoItems =
+                val protoItems =
                     labels.mapIndexed { index, label ->
                         ContextMenuItemProto
                             .newBuilder()
                             .setLabel(label)
-                            // Stable per-item ids are part of the protocol work the
-                            // kernel bridge's KDoc describes.
-                            .setActionId("${label}_${index}")
+                            // Unique within this ordered menu, not across edits or menus.
+                            // The passive bridge still discards these advisory ids.
+                            .setActionId("${label}_$index")
                             .build()
                     }
                 stub.registerContextMenu(
