@@ -54,7 +54,7 @@ class ContextMenuProviderProxy(
                             .setLabel(label)
                             // Unique within this ordered menu, not across edits or menus.
                             // The passive bridge still discards these advisory ids.
-                            .setActionId("${label}_$index")
+                            .setActionId(advisoryActionId(label, index))
                             .build()
                     }
                 stub.registerContextMenu(
@@ -74,3 +74,8 @@ class ContextMenuProviderProxy(
         return modifier
     }
 }
+
+internal fun advisoryActionId(
+    label: String,
+    index: Int,
+): String = "${label}_$index"
