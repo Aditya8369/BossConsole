@@ -252,6 +252,11 @@ object LogSanitizer {
      * `(?!\.[A-Za-z])` is that check - measured directly against a realistic stack trace
      * (`sanitizeStackTrace leaves a realistic Kotlin trace intact`) after the first version of this
      * pattern redacted `kotlinx.coroutines.internal` out of one.
+     *
+     * Coverage limits: multi-level public suffixes such as `.co.uk` are rejected by that same
+     * guard. Matching is case-sensitive: `Acme.corp.internal` retains `Acme.` while a fully
+     * mixed-case `Proxy.Corp.Internal` is untouched. Unlisted suffixes and IP literals also
+     * remain unchanged. This is selected lowercase-host redaction, not complete DNS redaction.
      */
     private val hostnamePattern =
         Regex(

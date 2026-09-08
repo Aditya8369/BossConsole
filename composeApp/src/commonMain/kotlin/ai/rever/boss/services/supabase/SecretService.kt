@@ -52,6 +52,9 @@ object SecretService {
     // BossConsole#145: every catch here used to fail silently - the only WARN in the log came
     // from the *calling plugin*, not the code that actually failed, which is why an exception
     // emptying every secret panel once read as a cosmetic glitch rather than an outage.
+    // sanitizeSupabaseFailure only rewrites serialization failures. Other exceptions can contain
+    // server-echoed secret values, so logs keep the operation/type, never the message or throwable.
+    // NETWORK matches NamedSupabaseLogging; these events diagnose RPC failures, not sign-in events.
     private val logger = BossLogger.forComponent("SecretService")
 
     private val client
@@ -91,8 +94,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "getUserSecrets"),
-                error = safe,
+                data = mapOf("operation" to "getUserSecrets", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -141,8 +143,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "searchSecrets"),
-                error = safe,
+                data = mapOf("operation" to "searchSecrets", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -199,8 +200,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "createSecret"),
-                error = safe,
+                data = mapOf("operation" to "createSecret", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -260,8 +260,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "updateSecret"),
-                error = safe,
+                data = mapOf("operation" to "updateSecret", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -299,8 +298,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "deleteSecret"),
-                error = safe,
+                data = mapOf("operation" to "deleteSecret", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -340,8 +338,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "getUserSecretsWithShared"),
-                error = safe,
+                data = mapOf("operation" to "getUserSecretsWithShared", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -384,8 +381,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "getUserSecretsWithSharingInfo"),
-                error = safe,
+                data = mapOf("operation" to "getUserSecretsWithSharingInfo", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -436,8 +432,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "shareSecret"),
-                error = safe,
+                data = mapOf("operation" to "shareSecret", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -483,8 +478,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "unshareSecret"),
-                error = safe,
+                data = mapOf("operation" to "unshareSecret", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
@@ -518,8 +512,7 @@ object SecretService {
             logger.warn(
                 LogCategory.NETWORK,
                 "Secret RPC failed",
-                data = mapOf("operation" to "getSecretShares"),
-                error = safe,
+                data = mapOf("operation" to "getSecretShares", "errorType" to e::class.simpleName),
             )
             Result.failure(safe)
         }
