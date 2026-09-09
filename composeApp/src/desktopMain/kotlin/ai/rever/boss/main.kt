@@ -514,10 +514,9 @@ fun main(args: Array<String>) {
     val kernelBootstrap: Any? =
         try {
             val bossMode =
-                System.getenv("BOSS_MODE")
-                    ?: ai.rever.boss.config.ConfigLoader
-                        .getConfig("BOSS_MODE")
-            if (bossMode == "KERNEL") {
+                ai.rever.boss.config.ConfigLoader
+                    .getConfig("BOSS_MODE")
+            if (bossMode.equals("KERNEL", ignoreCase = true)) {
                 val cls = Class.forName("ai.rever.boss.kernel.KernelBootstrap")
                 val modeClass = Class.forName("ai.rever.boss.process.ProcessMode")
                 val kernelMode = modeClass.enumConstants.first { it.toString() == "KERNEL" }

@@ -514,10 +514,9 @@ fun ApplicationScope.BossWindow(
                 val isKernelMode =
                     remember {
                         val mode =
-                            System.getenv("BOSS_MODE")
-                                ?: ai.rever.boss.config.ConfigLoader
-                                    .getConfig("BOSS_MODE")
-                        mode == "KERNEL"
+                            ai.rever.boss.config.ConfigLoader
+                                .getConfig("BOSS_MODE")
+                        mode.equals("KERNEL", ignoreCase = true)
                     }
                 CheckboxItem(
                     "Microkernel Mode",
@@ -525,24 +524,8 @@ fun ApplicationScope.BossWindow(
                     onCheckedChange = {
                         // Toggle in env_vars file; requires restart
                         menuScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            val envFile =
-                                ai.rever.boss.plugin.pathutils.BossDirectories
-                                    .resolve("env_vars")
-                            envFile.parentFile?.mkdirs()
-                            if (!envFile.exists()) {
-                                envFile.writeText(if (it) "BOSS_MODE=KERNEL\n" else "# BOSS_MODE=KERNEL\n", Charsets.UTF_8)
-                            } else {
-                                val lines = envFile.readLines(Charsets.UTF_8).toMutableList()
-                                val idx = lines.indexOfFirst { l -> l.trimStart('#', ' ').startsWith("BOSS_MODE") }
-                                val newLine = if (it) "BOSS_MODE=KERNEL" else "# BOSS_MODE=KERNEL"
-                                if (idx >= 0) {
-                                    lines[idx] = newLine
-                                } else {
-                                    lines.add("")
-                                    lines.add(newLine)
-                                }
-                                envFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
-                            }
+                            ai.rever.boss.config
+                                .writeSavedBossMode(it)
                         }
                     },
                 )
