@@ -93,28 +93,6 @@ if (protocAvailable) {
             }
         }
     }
-
-    sourceSets {
-        main {
-            java.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/java"))
-            java.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/grpc"))
-        }
-    }
-
-    kotlin {
-        sourceSets {
-            main {
-                kotlin.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/java"))
-                kotlin.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/grpc"))
-                kotlin.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/grpckt"))
-                kotlin.srcDir(layout.buildDirectory.dir("generated/sources/proto/main/kotlin"))
-            }
-        }
-    }
-
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        dependsOn("generateProto")
-    }
 } else {
     // Unsupported platform (Windows ARM64): use pre-generated sources.
     // These are committed at src/main/generated/ and kept in sync

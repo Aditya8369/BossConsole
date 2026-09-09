@@ -40,6 +40,7 @@ class ReapChildrenTest {
         private val onDestroy: () -> Unit = {},
         private val ignoreForce: Boolean = false,
         private val delayedForce: Boolean = false,
+        private val handle: ProcessHandle? = null,
     ) : Process() {
         private var alive = true
         private var destroys = 0
@@ -82,6 +83,8 @@ class ReapChildrenTest {
         }
 
         override fun isAlive(): Boolean = alive
+
+        override fun toHandle(): ProcessHandle = handle ?: super.toHandle()
 
         override fun pid(): Long = pidValue
     }
@@ -340,4 +343,37 @@ class ReapChildrenTest {
 
         assertFalse(process.isAlive, "omitting tokenRegistry must not stop the reap itself from working")
     }
+    @Test
+    fun `descendant failure does not skip siblings or parent and closes snapshot`() {
+        val killed = mutableListOf<Int>()
+        var snapshotClosed = false
+        fun handle(action: (String) -> Any?): ProcessHandle =
+            java.lang.reflect.Proxy.newProxyInstance(
+                ProcessHandle::class.java.classLoader,
+                arrayOf(ProcessHandle::class.java),
+            ) { _, method, _ -> action(method.name) } as ProcessHandle
+        val descendants = (1..3).map { id ->
+            handle { method ->
+                if (method == "isAlive") return@handle true
+                check(method == "destroyForcibly")
+                killed.add(id)
+                if (id == 2) error("termination refused")
+                true
+            }
+        }
+        val parentHandle = handle { method ->
+            check(method == "descendants")
+            descendants.stream().filter { killed.isEmpty() }.onClose { snapshotClosed = true }
+        }
+        val parent = FakeProcess(900, handle = parentHandle, onDestroy = {
+            assertTrue(killed.isEmpty(), "graceful shutdown must precede descendant force-kills")
+        })
+        val registry = ProcessRegistry()
+        registry.register("parent", managed("parent", parent))
+        reapChildren(null, registry)
+        assertFalse(parent.isAlive)
+        assertTrue(snapshotClosed)
+        assertEquals(listOf(1, 2, 3), killed)
+    }
+
 }

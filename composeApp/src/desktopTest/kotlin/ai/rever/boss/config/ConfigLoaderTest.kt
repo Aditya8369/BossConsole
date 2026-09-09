@@ -14,7 +14,7 @@ import kotlin.test.assertNull
  * a silent precedence regression would break production credential delivery.
  */
 class ConfigLoaderTest {
-    private val key = "SOME_KEY"
+    private val key = "BOSS_MODE"
 
     private fun props(value: String?) =
         Properties().apply {
@@ -119,6 +119,7 @@ class ConfigLoaderTest {
                     null,
                     envValue = blank,
                     sysPropValue = "from-sysprop",
+                    envVarsProps = Properties(),
                     localProps = local,
                     embeddedProps = Properties(),
                 ),
@@ -131,6 +132,7 @@ class ConfigLoaderTest {
                     null,
                     envValue = blank,
                     sysPropValue = blank,
+                    envVarsProps = Properties(),
                     localProps = local,
                     embeddedProps = Properties(),
                 ),
@@ -147,6 +149,7 @@ class ConfigLoaderTest {
                 null,
                 envValue = null,
                 sysPropValue = null,
+                envVarsProps = Properties(),
                 localProps = blankLocal,
                 embeddedProps = embedded,
             ),
@@ -164,9 +167,26 @@ class ConfigLoaderTest {
                 defaultValue = "",
                 envValue = null,
                 sysPropValue = null,
+                envVarsProps = Properties(),
                 localProps = Properties(),
                 embeddedProps = Properties(),
             ),
         )
     }
+    @Test
+    fun `env vars cannot override authentication endpoints`() {
+        assertEquals(
+            "embedded",
+            ConfigLoader.resolve(
+                key = "SUPABASE_URL",
+                defaultValue = null,
+                envValue = null,
+                sysPropValue = null,
+                envVarsProps = Properties().apply { setProperty("SUPABASE_URL", "untrusted") },
+                localProps = Properties(),
+                embeddedProps = Properties().apply { setProperty("SUPABASE_URL", "embedded") },
+            ),
+        )
+    }
+
 }

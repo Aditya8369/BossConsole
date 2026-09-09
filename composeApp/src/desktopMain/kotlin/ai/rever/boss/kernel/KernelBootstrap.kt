@@ -136,13 +136,9 @@ internal fun reapChildren(
         if (children.isEmpty()) return
 
         reapLogger.info("Reaping {} child process(es)", children.size)
+        val descendants = children.flatMap { processDescendants(it.process) }
         val deadline = System.currentTimeMillis() + gracePeriodMs
         children.forEach { child ->
-            runCatching {
-                child.process.toHandle().descendants().forEach { desc ->
-                    runCatching { desc.destroyForcibly() }
-                }
-            }
             runCatching { child.process.destroy() }
         }
 
@@ -161,13 +157,9 @@ internal fun reapChildren(
             }
         }
 
+        killProcessDescendants(descendants)
         children.filter { it.isAlive }.forEach { child ->
             reapLogger.warn("Force-killing process: {}", child.config.processId)
-            runCatching {
-                child.process.toHandle().descendants().forEach { desc ->
-                    runCatching { desc.destroyForcibly() }
-                }
-            }
             runCatching { child.process.destroyForcibly() }
         }
 
@@ -246,7 +238,7 @@ internal fun respawnCandidate(
             )
             notifyOperator(
                 processId,
-                "Exceeded max restart limit (${process.config.maxRestarts}). Use forceRespawn to recover.",
+                "Exceeded max restart limit (${process.config.maxRestarts}). Restart BOSS to retry.",
             )
             null
         }
@@ -345,7 +337,6 @@ internal fun recoveryFor(action: RepairAction?): Recovery {
  * 4. Monitors all child processes via ProcessMonitor, auto-respawns on failure
  * 5. Provides graceful shutdown cascade
  */
-@Suppress("TooManyFunctions", "ReturnCount")
 class KernelBootstrap(
     private val mode: ProcessMode = ProcessMode.MONOLITH,
 ) {
@@ -454,6 +445,13 @@ class KernelBootstrap(
                     val process = registry.getProcess(id)
                     if (process != null) {
                         if (force) process.destroyForcibly() else process.destroy()
+                        // Don't unregister — for a SERVICE/APP/ORCHESTRATOR the process monitor
+                        // will detect the exit and trigger auto-respawn if
+                        // restartPolicy == ON_FAILURE.
+                        //
+                        // PLUGIN is the exception: it is not health-supervised, so nothing
+                        // respawns it despite its config also saying ON_FAILURE, and the global
+                        // monitor prunes the dead entry instead.
                         true
                     } else {
                         false
@@ -685,7 +683,14 @@ class KernelBootstrap(
         val orchestratorJar = resolveServiceJar(bossDataDir, "boss-orchestrator-all.jar")
         val authJar = resolveServiceJar(bossDataDir, "boss-service-auth-all.jar")
 
+        // Children inherit nothing useful about where BOSS keeps its data, and the orchestrator
+        // writes snapshots there — say it explicitly rather than letting the child re-derive a
+        // default that may not match this process's.
         val serviceEnvironment = mapOf("BOSS_DATA_DIR" to bossDataDir)
+        // The model choice — and the key the operator entered for it — goes to the orchestrator
+        // alone; the other eight have no use for a credential. (A key exported into BOSS's own
+        // environment is still inherited by every child via ProcessSpawner — see
+        // SelfHealingSettingsManager.orchestratorEnvironment.)
         val repairEnvironment = SelfHealingSettingsManager.orchestratorEnvironment()
         logger.info(
             "AI repair for the orchestrator is {}",
@@ -853,83 +858,9 @@ class KernelBootstrap(
             browserJar,
         )
 
-        if (missingJars.isNotEmpty()) {
-            val listStr = missingJars.joinToString(", ")
-            val msg =
-                "Microkernel: Missing JARs for ${missingJars.size} service(s) ($listStr). " +
-                    "Run './gradlew fatJar' to build."
-            logger.warn(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager
-                .showMessage(msg, durationMs = 12_000)
-        }
-        if (failedSpawns.isNotEmpty()) {
-            val listStr = failedSpawns.joinToString(", ")
-            val msg = "Microkernel: Failed to spawn ${failedSpawns.size} service(s) ($listStr)."
-            logger.error(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager
-                .showMessage(msg, durationMs = 12_000)
-        }
-        if (spawnedCount > 0) {
-            val msg = "Microkernel mode active: $spawnedCount service(s) spawned."
-            logger.info(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager
-                .showMessage(msg, durationMs = 5_000)
-        }
-    }
-
-    /**
-     * Wait for a service process to register with the kernel and enter running state.
-     */
-    suspend fun awaitServiceReadiness(
-        processId: String,
-        timeoutMs: Long = 10_000,
-    ): Boolean {
-        val registry = processRegistry ?: return false
-        val startTime = System.currentTimeMillis()
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
-            val process = registry.getProcess(processId)
-            if (process != null && process.state.value == ProcessState.PROCESS_STATE_RUNNING) {
-                return true
-            }
-            kotlinx.coroutines.delay(100)
-        }
-        return false
-    }
-
-    /**
-     * Check if a service process is running and ready.
-     */
-    fun isServiceReady(processId: String): Boolean {
-        val process = processRegistry?.getProcess(processId) ?: return false
-        return process.state.value == ProcessState.PROCESS_STATE_RUNNING
-    }
-
-    /**
-     * Force-respawn a failed service process on demand, resetting its restart count.
-     */
-    fun forceRespawn(processId: String): Boolean {
-        val registry = processRegistry ?: return false
-        val spawner = processSpawner ?: return false
-        val process = registry.getProcess(processId) ?: return false
-
-        logger.info("Force-respawning service: {}", processId)
-        registry.resetRestartCount(processId)
-        return try {
-            spawner.spawn(process.config)
-            processMonitor?.startMonitoring(processId)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
-                "Microkernel: Recovered service $processId",
-                durationMs = 5000,
-            )
-            true
-        } catch (e: Exception) {
-            logger.error("Failed to force-respawn service {}: {}", processId, e.message)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
-                "Microkernel: Failed to recover $processId: ${e.message}",
-                durationMs = 8000,
-            )
-            false
-        }
+        val summary = serviceStartupSummary(spawnedCount, missingJars, failedSpawns)
+        logger.info(summary)
+        ai.rever.boss.startup.kernelStartupNotices.report(summary)
     }
 
     /**

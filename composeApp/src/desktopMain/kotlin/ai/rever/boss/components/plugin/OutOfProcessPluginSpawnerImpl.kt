@@ -1,5 +1,3 @@
-@file:Suppress("TooManyFunctions")
-
 package ai.rever.boss.components.plugin
 
 import ai.rever.boss.ipc.BossIpcClient
@@ -40,7 +38,6 @@ import java.util.concurrent.ConcurrentHashMap
  * The spawner tracks all managed processes and provides connection info
  * (gRPC channel) for [PluginStateBridge] and remote UI components.
  */
-@Suppress("TooManyFunctions")
 class OutOfProcessPluginSpawnerImpl(
     private val processSpawner: ProcessSpawner,
     private val windowId: String = "",
@@ -224,28 +221,21 @@ class OutOfProcessPluginSpawnerImpl(
     /**
      * Tear down everything [spawn] may have created for a plugin whose startup failed.
      */
-    private fun killDescendants(process: Process?) {
-        runCatching {
-            process?.toHandle()?.descendants()?.forEach { desc ->
-                runCatching { desc.destroyForcibly() }
-            }
-        }
-    }
-
     private fun cleanupFailedSpawn(pluginId: String) {
         runCatching { stateBridges.remove(pluginId)?.dispose() }
         runCatching { pluginChannels.remove(pluginId)?.shutdownNow() }
         // Kill first, drop the registry entry second: while the child is alive the registry entry
         // is the only thing that would let a host exit reap it.
         val process = managedProcesses.remove(pluginId)
-        killDescendants(process?.process)
+        ai.rever.boss.kernel.killProcessDescendants(ai.rever.boss.kernel.processDescendants(process?.process))
         runCatching { process?.destroyForcibly() }
-        process?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
+        process?.takeUnless { it.isAlive }?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
     }
 
     override suspend fun terminate(pluginId: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             val process = managedProcesses.remove(pluginId)
+            val descendants = ai.rever.boss.kernel.processDescendants(process?.process)
             try {
                 // Dispose state bridge
                 stateBridges.remove(pluginId)?.dispose()
@@ -262,7 +252,6 @@ class OutOfProcessPluginSpawnerImpl(
                 // Destroy process
                 if (process != null) {
                     logger.info("Terminating plugin process: id={}, pid={}", pluginId, process.pid)
-                    killDescendants(process.process)
                     process.destroy()
 
                     // Wait for graceful shutdown, then force kill
@@ -278,16 +267,17 @@ class OutOfProcessPluginSpawnerImpl(
                 Result.success(Unit)
             } catch (e: Exception) {
                 // Force kill if graceful shutdown failed
-                killDescendants(process?.process)
                 process?.destroyForcibly()
                 logger.warn("Force-killed plugin process: id={}", pluginId, e)
+                if (e is kotlinx.coroutines.CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
                 Result.success(Unit)
             } finally {
+                ai.rever.boss.kernel.killProcessDescendants(descendants)
                 // Registry entry goes last, and only if it is still this process. "Registered
                 // implies reapable" has to hold for as long as the child is alive, so a host exit
                 // part-way through an unload still reaps it; and removing by id alone could evict
                 // a replacement that a concurrent respawn had already registered.
-                process?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
+                process?.takeUnless { it.isAlive }?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
             }
         }
 
