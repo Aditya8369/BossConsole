@@ -173,6 +173,7 @@ class ConfigLoaderTest {
             ),
         )
     }
+
     @Test
     fun `env vars cannot override authentication endpoints`() {
         assertEquals(
@@ -188,5 +189,4 @@ class ConfigLoaderTest {
             ),
         )
     }
-
 }

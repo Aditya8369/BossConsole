@@ -206,6 +206,7 @@ internal fun discardReapedSpawn(
 }
 
 private val recoveryLogger = LoggerFactory.getLogger("KernelRecovery")
+
 // Global monitoring revisits dead services every two seconds. Report each failed generation once.
 private val restartLimitNotices = ConcurrentHashMap<String, ManagedProcess>()
 
@@ -867,7 +868,8 @@ class KernelBootstrap(
 
         val summary = serviceStartupSummary(spawnedCount, missingJars, failedSpawns)
         logger.info(summary)
-        ai.rever.boss.startup.kernelStartupNotices.report(summary)
+        ai.rever.boss.startup.kernelStartupNotices
+            .report(summary)
     }
 
     /**
