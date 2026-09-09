@@ -427,31 +427,6 @@ fun main(args: Array<String>) {
 
     logger.info(LogCategory.SYSTEM, "BOSS starting up")
 
-    // Initialize microkernel infrastructure (no-op in MONOLITH mode, which is default)
-    // On Windows ARM64, boss-ipc/boss-process-manager modules are excluded (no protoc),
-    // so KernelBootstrap may not be available — silently skip.
-    val kernelBootstrap: Any? =
-        try {
-            val bossMode =
-                System.getenv("BOSS_MODE")
-                    ?: ai.rever.boss.config.ConfigLoader
-                        .getConfig("BOSS_MODE")
-            if (bossMode == "KERNEL") {
-                val cls = Class.forName("ai.rever.boss.kernel.KernelBootstrap")
-                val modeClass = Class.forName("ai.rever.boss.process.ProcessMode")
-                val kernelMode = modeClass.enumConstants.first { it.toString() == "KERNEL" }
-                val instance = cls.getConstructor(modeClass).newInstance(kernelMode)
-                cls.getMethod("initialize").invoke(instance)
-                instance
-            } else {
-                null
-            }
-        } catch (_: ClassNotFoundException) {
-            null
-        } catch (_: NoClassDefFoundError) {
-            null
-        }
-
     // Single-instance check: ensure only one BOSS instance runs
     // On Windows, this prevents multiple windows when clicking deep links
     if (!SingleInstanceManager.acquireLock()) {
@@ -530,6 +505,33 @@ fun main(args: Array<String>) {
             exitProcess(0)
         }
     }
+
+    // A forwarding launch must never bind the kernel socket or spawn a second service cohort.
+    // This matters for saved KERNEL mode too: all later OS file/link launches read that setting.
+    // Initialize microkernel infrastructure (no-op in MONOLITH mode, which is default)
+    // On Windows ARM64, boss-ipc/boss-process-manager modules are excluded (no protoc),
+    // so KernelBootstrap may not be available — silently skip.
+    val kernelBootstrap: Any? =
+        try {
+            val bossMode =
+                System.getenv("BOSS_MODE")
+                    ?: ai.rever.boss.config.ConfigLoader
+                        .getConfig("BOSS_MODE")
+            if (bossMode == "KERNEL") {
+                val cls = Class.forName("ai.rever.boss.kernel.KernelBootstrap")
+                val modeClass = Class.forName("ai.rever.boss.process.ProcessMode")
+                val kernelMode = modeClass.enumConstants.first { it.toString() == "KERNEL" }
+                val instance = cls.getConstructor(modeClass).newInstance(kernelMode)
+                cls.getMethod("initialize").invoke(instance)
+                instance
+            } else {
+                null
+            }
+        } catch (_: ClassNotFoundException) {
+            null
+        } catch (_: NoClassDefFoundError) {
+            null
+        }
 
     // Brand any window BOSS does not compose itself - JxBrowser's own Swing dialogs, JFileChooser,
     // a frame opened by a plugin - so none of them shows the JDK's default Java icon on Windows.

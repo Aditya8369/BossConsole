@@ -369,14 +369,16 @@ class ReapChildrenTest {
                 check(method == "descendants")
                 descendants.stream().filter { killed.isEmpty() }.onClose { snapshotClosed = true }
             }
+        var gracefulSawIntactDescendants = false
         val parent =
             FakeProcess(900, handle = parentHandle, onDestroy = {
-                assertTrue(killed.isEmpty(), "graceful shutdown must precede descendant force-kills")
+                gracefulSawIntactDescendants = killed.isEmpty()
             })
         val registry = ProcessRegistry()
         registry.register("parent", managed("parent", parent))
         reapChildren(null, registry)
         assertFalse(parent.isAlive)
+        assertTrue(gracefulSawIntactDescendants)
         assertTrue(snapshotClosed)
         assertEquals(listOf(1, 2, 3), killed)
     }
