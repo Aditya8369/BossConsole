@@ -376,4 +376,14 @@ class ReapChildrenTest {
         assertEquals(listOf(1, 2, 3), killed)
     }
 
+    @Test
+    fun `restart cap notice is emitted once per failed process generation`() {
+        val first = managed("notice-generation", FakeProcess(910))
+        val replacement = managed("notice-generation", FakeProcess(911))
+        assertTrue(firstRestartLimitNotice(first))
+        assertFalse(firstRestartLimitNotice(first))
+        assertTrue(firstRestartLimitNotice(replacement))
+        assertFalse(firstRestartLimitNotice(replacement))
+    }
+
 }

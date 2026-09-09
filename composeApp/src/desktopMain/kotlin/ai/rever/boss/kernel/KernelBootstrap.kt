@@ -206,6 +206,11 @@ internal fun discardReapedSpawn(
 }
 
 private val recoveryLogger = LoggerFactory.getLogger("KernelRecovery")
+// Global monitoring revisits dead services every two seconds. Report each failed generation once.
+private val restartLimitNotices = ConcurrentHashMap<String, ManagedProcess>()
+
+internal fun firstRestartLimitNotice(process: ManagedProcess): Boolean =
+    restartLimitNotices.put(process.config.processId, process) !== process
 
 /**
  * The process to bring back, or null when recovery should stand down.
@@ -236,10 +241,12 @@ internal fun respawnCandidate(
                 processId,
                 process.config.maxRestarts,
             )
-            notifyOperator(
-                processId,
-                "Exceeded max restart limit (${process.config.maxRestarts}). Restart BOSS to retry.",
-            )
+            if (firstRestartLimitNotice(process)) {
+                notifyOperator(
+                    processId,
+                    "Exceeded max restart limit (${process.config.maxRestarts}). Restart BOSS to retry.",
+                )
+            }
             null
         }
 
