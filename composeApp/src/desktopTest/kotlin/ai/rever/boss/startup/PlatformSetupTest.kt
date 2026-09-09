@@ -79,13 +79,16 @@ class PlatformSetupTest {
             object : ClassLoader(null) {
                 override fun getResourceAsStream(name: String): java.io.InputStream? {
                     if (name != "native/linux/x86-64/libpty.so") return null
-                    if (!fail) return ByteArrayInputStream("complete-native".toByteArray())
-                    return object : java.io.InputStream() {
-                        var remaining = 9000
+                    return if (!fail) {
+                        ByteArrayInputStream("complete-native".toByteArray())
+                    } else {
+                        object : java.io.InputStream() {
+                            var remaining = 9000
 
-                        override fun read(): Int {
-                            if (--remaining < 0) throw java.io.IOException("interrupted copy")
-                            return 65
+                            override fun read(): Int {
+                                if (--remaining < 0) throw java.io.IOException("interrupted copy")
+                                return 65
+                            }
                         }
                     }
                 }
