@@ -2,7 +2,9 @@ package ai.rever.boss.plugin
 
 import ai.rever.boss.config.GitHubConfig
 import ai.rever.boss.config.SupabaseClientConfig
+import ai.rever.boss.plugin.loader.PluginSignatureEnforcement
 import ai.rever.boss.plugin.loader.PluginSignatureSidecar
+import ai.rever.boss.plugin.loader.PluginStoreTrust
 import ai.rever.boss.plugin.pathutils.BossDirectories
 import ai.rever.boss.plugin.repository.LocalPluginRepository
 import ai.rever.boss.plugin.repository.PluginRepositoryManager
@@ -77,8 +79,10 @@ internal data class BackgroundSystemPluginUpdate(
 )
 
 internal suspend fun finishBackgroundSystemPluginUpdate(update: BackgroundSystemPluginUpdate) {
-    if (!update.plugin.downloadOnly) update.persistLoadablePlugin(update.promotedJar)
-    update.persistSignature(update.promotedJar)
+    if (!update.plugin.downloadOnly) {
+        update.persistLoadablePlugin(update.promotedJar)
+        update.persistSignature(update.promotedJar)
+    }
 
     if (!update.plugin.downloadOnly) return
 
@@ -858,8 +862,7 @@ object PluginStoreSetup {
             return
         }
 
-        val signature = fetchStoreSignature(manifest.pluginId, manifest.version, resolvedAgainstSha)
-        if (signature == null) return
+        val signature = resolveSignatureToBind(jarFile, manifest, resolvedAgainstSha) ?: return
 
         // Bind only if the bytes are still the ones we resolved against. Resolving
         // a signature involves a network round trip, and another path may replace
@@ -891,22 +894,101 @@ object PluginStoreSetup {
     }
 
     /**
-     * Ask the store for the signature covering [localSha256], or null to leave the
-     * JAR unsigned. Never writes; the caller decides what to do with the answer.
+     * What the store had to say about a JAR's bytes.
+     *
+     * The distinction that matters is settled versus unsettled, not signed versus
+     * unsigned: [Mismatch] is an answer that will not change until the JAR or the
+     * store row does, so it can be remembered, while [Unavailable] is the store
+     * failing to answer and must stay retryable. Collapsing both to null is what
+     * made the mismatch case re-cost a `getDownloadUrl` on every launch.
+     */
+    internal sealed interface StoreSignatureOutcome {
+        data class Signed(
+            val signatureBase64: String,
+        ) : StoreSignatureOutcome
+
+        /** The store has this version and vouches for different bytes. */
+        data object Mismatch : StoreSignatureOutcome
+
+        /** Unreachable, no row, published before signing, or a 403 from the gate. */
+        data object Unavailable : StoreSignatureOutcome
+    }
+
+    /**
+     * The signature to bind to [jarFile], or null to leave it unsigned.
+     *
+     * Split out from [persistStoreSignatureSidecar] because it owns one decision
+     * the caller should not have to re-derive: whether "no signature" is a settled
+     * answer worth remembering, or a transient one that must stay retryable.
+     */
+    internal suspend fun resolveSignatureToBind(
+        jarFile: File,
+        manifest: ai.rever.boss.plugin.api.PluginManifest,
+        localSha256: String,
+        fetch: suspend (String, String, String) -> StoreSignatureOutcome = ::fetchStoreSignature,
+    ): String? {
+        val anchor = PluginStoreTrust.versionAnchor(manifest.pluginId, manifest.version, localSha256)
+        // Enforcement makes a retry cheaper than leaving a corrected store row unreachable.
+        if (
+            !PluginSignatureEnforcement.enforceUnsigned &&
+            PluginSignatureSidecar.isKnownUnsignable(jarFile.absolutePath, anchor)
+        ) {
+            logger.warn(
+                LogCategory.SYSTEM,
+                "System plugin left unsigned - cached store artifact mismatch; remove the marker to retry",
+                mapOf(
+                    "pluginId" to manifest.pluginId,
+                    "version" to manifest.version,
+                    "marker" to PluginSignatureSidecar.unsignablePathFor(jarFile.absolutePath),
+                ),
+            )
+            return null
+        }
+
+        return when (val outcome = fetch(manifest.pluginId, manifest.version, localSha256)) {
+            is StoreSignatureOutcome.Signed -> {
+                outcome.signatureBase64
+            }
+
+            // Settled: remember it, so the next launch does not spend another
+            // getDownloadUrl (and another `plugin_downloads` row) re-learning it.
+            StoreSignatureOutcome.Mismatch -> {
+                // A replacement during the lookup merely leaves an inert old-digest marker.
+                // Unlike a signature, that cannot bind the wrong bytes or fail plugin loading.
+                PluginSignatureSidecar.markUnsignable(jarFile.absolutePath, anchor)
+                null
+            }
+
+            // Unsettled: stays retryable.
+            StoreSignatureOutcome.Unavailable -> {
+                null
+            }
+        }
+    }
+
+    /**
+     * Ask the store for the signature covering [localSha256]. Never writes; the
+     * caller decides what to do with the answer.
      */
     private suspend fun fetchStoreSignature(
         pluginId: String,
         version: String,
         localSha256: String,
-    ): String? =
+    ): StoreSignatureOutcome =
         try {
             val info = PluginStoreClient.getDownloadUrl(pluginId, version)
-            resolveSidecarSignature(
-                storeSha256 = info.sha256,
-                storeSignature = info.signature,
-                localSha256 = localSha256,
-            ).also {
-                if (it == null && info.signature != null) {
+            val resolved =
+                resolveSidecarSignature(
+                    storeSha256 = info.sha256,
+                    storeSignature = info.signature,
+                    localSha256 = localSha256,
+                )
+            when {
+                resolved != null -> {
+                    StoreSignatureOutcome.Signed(resolved)
+                }
+
+                info.signature != null -> {
                     logger.warn(
                         LogCategory.SYSTEM,
                         "System plugin left unsigned - GitHub asset differs from the store artifact",
@@ -917,6 +999,13 @@ object PluginStoreSetup {
                             "localSha256" to localSha256,
                         ),
                     )
+                    StoreSignatureOutcome.Mismatch
+                }
+
+                // A row with no signature at all: published before store signing.
+                // Signing it later is a store-side change, so this stays retryable.
+                else -> {
+                    StoreSignatureOutcome.Unavailable
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -936,7 +1025,7 @@ object PluginStoreSetup {
                 "System plugin left unsigned - no store signature available",
                 mapOf("pluginId" to pluginId, "version" to version, "error" to e.toString()),
             )
-            null
+            StoreSignatureOutcome.Unavailable
         }
 
     /**
@@ -956,7 +1045,7 @@ object PluginStoreSetup {
     ): String? = if (storeSha256.equals(localSha256, ignoreCase = true)) storeSignature else null
 
     /** True when [jarFile] still hashes to [expectedSha256]; false if it moved or is unreadable. */
-    private fun stillMatchesResolvedBytes(
+    internal fun stillMatchesResolvedBytes(
         jarFile: File,
         expectedSha256: String,
     ): Boolean = runCatching { sha256Of(jarFile).equals(expectedSha256, ignoreCase = true) }.getOrDefault(false)
@@ -1663,10 +1752,19 @@ object PluginStoreSetup {
                             "oldJar" to oldJar.name,
                         ),
                     )
-                    oldJar.delete()
+                    val oldJarDeleted = oldJar.delete()
                     // A sidecar outlives the JAR it describes unless it's removed
                     // with it, leaving orphaned `.sig` files in the plugin dir.
-                    runCatching { PluginSignatureSidecar.delete(oldJar.absolutePath) }
+                    //
+                    // Gated on the JAR actually going, like the download path's own
+                    // sweep. `File.delete` fails while the JVM holds the JAR open
+                    // (Windows, or a version still loaded this session), and dropping
+                    // the sidecar off a JAR that then stays turns a signed plugin
+                    // into an unsigned one — the exact regression this whole path
+                    // exists to prevent.
+                    if (oldJarDeleted) {
+                        runCatching { PluginSignatureSidecar.delete(oldJar.absolutePath) }
+                    }
                 }
 
                 // Copy to plugin directory

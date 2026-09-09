@@ -108,14 +108,14 @@ class PluginJarReconcilerSidecarTest {
                     promotedJar = newJar,
                     pluginDir = dir,
                     persistLoadablePlugin = { error("download-only artifacts must not be persisted") },
-                    persistSignature = { PluginSignatureSidecar.write(it.absolutePath, "bmV3LXNpZw==") },
+                    persistSignature = { error("download-only artifacts must not request a store signature") },
                     manifestIdOf = { file -> if (file == oldJar) pluginId else null },
                     onSupersededArtifactProcessed = { _, _ -> },
                 ),
             )
 
             assertTrue(newJar.exists(), "the promoted runtime artifact must remain")
-            assertTrue(File(PluginSignatureSidecar.pathFor(newJar.absolutePath)).exists())
+            assertFalse(File(PluginSignatureSidecar.pathFor(newJar.absolutePath)).exists())
             assertFalse(oldJar.exists(), "the superseded runtime artifact must be cleaned up")
             assertFalse(File(PluginSignatureSidecar.pathFor(oldJar.absolutePath)).exists())
         }
