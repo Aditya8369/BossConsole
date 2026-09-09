@@ -32,9 +32,9 @@ import ai.rever.boss.plugin.sandbox.ui.installCrashInterceptor
 import ai.rever.boss.plugin.ui.BossThemeController
 import ai.rever.boss.project.DefaultWorkingDirectory
 import ai.rever.boss.services.passkey.PasskeyPlatformInit
+import ai.rever.boss.startup.ChromiumBootstrap
 import ai.rever.boss.startup.CliBootstrap
 import ai.rever.boss.startup.CliDispatchResult
-import ai.rever.boss.startup.ChromiumBootstrap
 import ai.rever.boss.startup.OverlaySetup
 import ai.rever.boss.startup.PlatformSetup
 import ai.rever.boss.startup.ShutdownSequence
@@ -200,11 +200,14 @@ fun main(args: Array<String>) {
 
     // Publish browser configuration flags as system properties
     ChromiumFlagsSettingsManager.applyToSystemProperties()
-    ai.rever.boss.config.SwipeNavSettingsManager.publish()
-    ai.rever.boss.config.AutoPipSettingsManager.publish()
+    ai.rever.boss.config.SwipeNavSettingsManager
+        .publish()
+    ai.rever.boss.config.AutoPipSettingsManager
+        .publish()
 
     // Compose UI rendering backend override (Skiko)
-    ConfigLoader.getConfig("BOSS_SKIKO_RENDER_API")
+    ConfigLoader
+        .getConfig("BOSS_SKIKO_RENDER_API")
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
         ?.let { requested ->
@@ -468,7 +471,8 @@ fun main(args: Array<String>) {
                             if (progress.isComplete) {
                                 WindowManager.createNewWindow()
                                 runCatching {
-                                    ai.rever.boss.plugin.browser.FluckEngine.prewarmInBackground(force = true)
+                                    ai.rever.boss.plugin.browser.FluckEngine
+                                        .prewarmInBackground(force = true)
                                 }
                                 isDownloadingChromium = false
                             }
@@ -502,7 +506,8 @@ fun main(args: Array<String>) {
                                             if (progress.isComplete) {
                                                 WindowManager.createNewWindow()
                                                 runCatching {
-                                                    ai.rever.boss.plugin.browser.FluckEngine.prewarmInBackground(force = true)
+                                                    ai.rever.boss.plugin.browser.FluckEngine
+                                                        .prewarmInBackground(force = true)
                                                 }
                                                 isDownloadingChromium = false
                                             }
@@ -528,7 +533,9 @@ fun main(args: Array<String>) {
                         BossWindow(
                             windowState = windowState,
                             onCloseRequest = {
-                                val awtWindow = ai.rever.boss.utils.WindowFocusManager.getWindow(windowState.id)
+                                val awtWindow =
+                                    ai.rever.boss.utils.WindowFocusManager
+                                        .getWindow(windowState.id)
                                 var needsTransitionWait = false
                                 if (awtWindow is java.awt.Frame) {
                                     if (awtWindow.extendedState != java.awt.Frame.NORMAL) {
@@ -595,11 +602,14 @@ fun main(args: Array<String>) {
                                     .getState(windowState.id)
                                     ?.disposeAllBrowsersBlocking()
 
-                                ai.rever.boss.run.RunnerTerminalService.cleanupWindow(windowState.id)
-                                ai.rever.boss.services.terminal.TerminalAPIAccess.removeAllForWindow(windowState.id)
+                                ai.rever.boss.run.RunnerTerminalService
+                                    .cleanupWindow(windowState.id)
+                                ai.rever.boss.services.terminal.TerminalAPIAccess
+                                    .removeAllForWindow(windowState.id)
 
                                 WindowManager.closeWindow(windowState.id)
-                                ai.rever.boss.utils.WindowFocusManager.unregisterWindow(windowState.id)
+                                ai.rever.boss.utils.WindowFocusManager
+                                    .unregisterWindow(windowState.id)
                             },
                         )
                     }

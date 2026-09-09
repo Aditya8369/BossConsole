@@ -17,7 +17,7 @@ class ShutdownSequenceTest {
                 },
                 ShutdownStep("failing step 2") {
                     executionLog.add("step2")
-                    throw RuntimeException("Simulated failure in step 2")
+                    error("Simulated failure in step 2")
                 },
                 ShutdownStep("step 3") {
                     executionLog.add("step3")

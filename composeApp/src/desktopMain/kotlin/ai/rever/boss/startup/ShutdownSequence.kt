@@ -74,6 +74,7 @@ object ShutdownSequence {
     /**
      * Executes all shutdown steps sequentially with error isolation, followed by lock release.
      */
+    @Suppress("TooGenericExceptionCaught")
     fun execute(
         steps: List<ShutdownStep>,
         releaseLock: () -> Unit = { SingleInstanceManager.release() },

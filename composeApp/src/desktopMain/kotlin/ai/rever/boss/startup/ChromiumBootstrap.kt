@@ -24,6 +24,7 @@ object ChromiumBootstrap {
      * Inspects the browser engine, cleans stale locks, promotes pending downloads,
      * logs engine startup verdicts, and initiates background pre-warming if ready.
      */
+    @Suppress("TooGenericExceptionCaught")
     fun prepare(): ChromiumPreparation {
         // Proactively clean up stale JxBrowser lock files from previous sessions
         try {

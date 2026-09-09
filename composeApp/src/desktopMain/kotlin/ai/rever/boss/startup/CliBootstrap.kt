@@ -19,7 +19,10 @@ import kotlinx.coroutines.runBlocking
  * Result of early / headless CLI dispatch before GUI initialization.
  */
 sealed interface CliDispatchResult {
-    data class Exit(val code: Int) : CliDispatchResult
+    data class Exit(
+        val code: Int,
+    ) : CliDispatchResult
+
     data object Continue : CliDispatchResult
 }
 
@@ -46,32 +49,34 @@ object CliBootstrap {
      * Returns [CliDispatchResult.Exit] if the process should terminate immediately with an exit code,
      * or [CliDispatchResult.Continue] if GUI bootstrap should proceed.
      */
-    fun dispatchHeadless(args: Array<String>): CliDispatchResult {
-        // Codex invokes this headless credential helper. Handle it before AWT,
-        // plugins, logging, or the single-instance lock so stdout stays token-only.
-        if (RisaLlmTokenCommand.isRequested(args)) {
-            return CliDispatchResult.Exit(RisaLlmTokenCommand.execute())
-        }
+    @Suppress("TooGenericExceptionCaught")
+    fun dispatchHeadless(args: Array<String>): CliDispatchResult =
+        when {
+            // Codex invokes this headless credential helper. Handle it before AWT,
+            // plugins, logging, or the single-instance lock so stdout stays token-only.
+            RisaLlmTokenCommand.isRequested(args) -> {
+                CliDispatchResult.Exit(RisaLlmTokenCommand.execute())
+            }
 
-        // Headless CLI commands (status, mcp, completion, --help) target the running
-        // instance or generate output headlessly. Execute before AWT, plugins, Skiko,
-        // or acquiring the single-instance lock so they fail without GUI startup when BOSS is
-        // closed without booting the GUI or corrupting standard output streams.
-        if (isHeadlessCli(args)) {
-            configureHeadlessLogging()
-            return try {
-                createBossCLI().main(args)
-                CliDispatchResult.Exit(0)
-            } catch (e: ProgramResult) {
-                CliDispatchResult.Exit(e.statusCode)
-            } catch (e: Exception) {
-                System.err.println("Error: ${e.message ?: "Failed to execute CLI command"}")
-                CliDispatchResult.Exit(1)
+            // Headless CLI commands (status, mcp, completion, --help) target the running
+            // instance or generate output headlessly.
+            isHeadlessCli(args) -> {
+                configureHeadlessLogging()
+                try {
+                    createBossCLI().main(args)
+                    CliDispatchResult.Exit(0)
+                } catch (e: ProgramResult) {
+                    CliDispatchResult.Exit(e.statusCode)
+                } catch (e: Exception) {
+                    System.err.println("Error: ${e.message ?: "Failed to execute CLI command"}")
+                    CliDispatchResult.Exit(1)
+                }
+            }
+
+            else -> {
+                CliDispatchResult.Continue
             }
         }
-
-        return CliDispatchResult.Continue
-    }
 
     /**
      * Handles early protocol unregistration flag before single-instance lock or window creation.
@@ -87,7 +92,10 @@ object CliBootstrap {
      * Forwards open requests to an already running instance when single-instance lock acquisition fails.
      * Returns true if all requests were successfully forwarded or there were no URLs to forward.
      */
-    fun forwardToExistingInstance(args: Array<String>, maxRetries: Int = 3): Boolean {
+    fun forwardToExistingInstance(
+        args: Array<String>,
+        maxRetries: Int = 3,
+    ): Boolean {
         val deepLinks = OsOpenArguments.deepLinksFrom(args)
         if (deepLinks.isEmpty()) {
             logger.info(LogCategory.SYSTEM, "No URL to send - existing BOSS window should be visible")
@@ -137,12 +145,17 @@ object CliBootstrap {
     /**
      * Dispatches CLI arguments after the single-instance lock has been acquired.
      */
+    @Suppress("TooGenericExceptionCaught")
     fun dispatchPostLock(args: Array<String>) {
         if (args.isNotEmpty()) {
             try {
                 val osOpenRequests = OsOpenArguments.deepLinksFrom(args)
                 if (osOpenRequests.isEmpty()) {
-                    logger.debug(LogCategory.SYSTEM, "Processing CLI arguments", mapOf("args" to args.joinToString(" ")))
+                    logger.debug(
+                        LogCategory.SYSTEM,
+                        "Processing CLI arguments",
+                        mapOf("args" to args.joinToString(" ")),
+                    )
                     createBossCLI().main(args)
                 }
             } catch (e: Exception) {

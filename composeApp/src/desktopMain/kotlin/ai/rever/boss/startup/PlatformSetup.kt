@@ -61,6 +61,7 @@ object PlatformSetup {
      * Must be called before any windows are created.
      * Requires JVM arg: --add-opens java.desktop/sun.awt.X11=ALL-UNNAMED
      */
+    @Suppress("TooGenericExceptionCaught")
     fun setLinuxWMClass() {
         if (!System.getProperty("os.name").lowercase().contains("linux")) return
 
@@ -112,6 +113,7 @@ object PlatformSetup {
     /**
      * Extracts PTY4J native libraries from classpath into [targetDir] if available.
      */
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "NestedBlockDepth", "TooGenericExceptionCaught")
     internal fun extractPty4jNatives(
         targetDir: File,
         osName: String = System.getProperty("os.name").lowercase(),
