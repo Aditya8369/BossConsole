@@ -932,6 +932,7 @@ kotlin {
             implementation(projects.pluginPlatform.pluginWorkspaceTypes)
             implementation(projects.pluginPlatform.pluginBookmarkTypes)
             implementation(projects.pluginPlatform.pluginIcons)
+            implementation(projects.pluginPlatform.pluginLanguageTypes)
             implementation(projects.pluginPlatform.pluginPathUtils)
             implementation(projects.pluginPlatform.pluginSandbox)
 
@@ -1087,6 +1088,7 @@ kotlin {
                 // Found by WindowsArm64SourceIsolationTest rather than by a build breaking.
                 "**/plugin/IpcCompatibilityTest.kt",
                 "**/plugin/PluginStoreSetupIpcGateTest.kt",
+                "**/plugin/PluginStateDeltaTest.kt",
             )
         }
     }
