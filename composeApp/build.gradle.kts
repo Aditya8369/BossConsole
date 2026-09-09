@@ -1086,6 +1086,7 @@ kotlin {
                 // Found by WindowsArm64SourceIsolationTest rather than by a build breaking.
                 "**/plugin/IpcCompatibilityTest.kt",
                 "**/plugin/PluginStoreSetupIpcGateTest.kt",
+                "**/plugin/PluginStateDeltaTest.kt",
             )
         }
     }
