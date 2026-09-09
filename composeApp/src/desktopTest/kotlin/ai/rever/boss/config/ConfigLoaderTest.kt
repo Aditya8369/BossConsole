@@ -14,7 +14,7 @@ import kotlin.test.assertNull
  * a silent precedence regression would break production credential delivery.
  */
 class ConfigLoaderTest {
-    private val key = "SOME_KEY"
+    private val key = "BOSS_MODE"
 
     private fun props(value: String?) =
         Properties().apply {
@@ -24,6 +24,7 @@ class ConfigLoaderTest {
     private fun resolve(
         env: String? = null,
         sysProp: String? = null,
+        envVars: String? = null,
         local: String? = null,
         embedded: String? = null,
         default: String? = null,
@@ -32,6 +33,7 @@ class ConfigLoaderTest {
         defaultValue = default,
         envValue = env,
         sysPropValue = sysProp,
+        envVarsProps = props(envVars),
         localProps = props(local),
         embeddedProps = props(embedded),
     )
@@ -40,7 +42,7 @@ class ConfigLoaderTest {
     fun `env wins over all other tiers`() {
         assertEquals(
             "from-env",
-            resolve(env = "from-env", sysProp = "x", local = "x", embedded = "x", default = "x"),
+            resolve(env = "from-env", sysProp = "x", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
@@ -48,12 +50,20 @@ class ConfigLoaderTest {
     fun `system property wins below env`() {
         assertEquals(
             "from-sysprop",
-            resolve(sysProp = "from-sysprop", local = "x", embedded = "x", default = "x"),
+            resolve(sysProp = "from-sysprop", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
     @Test
-    fun `local properties win below system property`() {
+    fun `envVars properties win below system property`() {
+        assertEquals(
+            "from-envvars",
+            resolve(envVars = "from-envvars", local = "x", embedded = "x", default = "x"),
+        )
+    }
+
+    @Test
+    fun `local properties win below envVars properties`() {
         assertEquals(
             "from-local",
             resolve(local = "from-local", embedded = "x", default = "x"),
@@ -109,6 +119,7 @@ class ConfigLoaderTest {
                     null,
                     envValue = blank,
                     sysPropValue = "from-sysprop",
+                    envVarsProps = Properties(),
                     localProps = local,
                     embeddedProps = Properties(),
                 ),
@@ -121,6 +132,7 @@ class ConfigLoaderTest {
                     null,
                     envValue = blank,
                     sysPropValue = blank,
+                    envVarsProps = Properties(),
                     localProps = local,
                     embeddedProps = Properties(),
                 ),
@@ -137,6 +149,7 @@ class ConfigLoaderTest {
                 null,
                 envValue = null,
                 sysPropValue = null,
+                envVarsProps = Properties(),
                 localProps = blankLocal,
                 embeddedProps = embedded,
             ),
@@ -154,8 +167,25 @@ class ConfigLoaderTest {
                 defaultValue = "",
                 envValue = null,
                 sysPropValue = null,
+                envVarsProps = Properties(),
                 localProps = Properties(),
                 embeddedProps = Properties(),
+            ),
+        )
+    }
+
+    @Test
+    fun `env vars cannot override authentication endpoints`() {
+        assertEquals(
+            "embedded",
+            ConfigLoader.resolve(
+                key = "SUPABASE_URL",
+                defaultValue = null,
+                envValue = null,
+                sysPropValue = null,
+                envVarsProps = Properties().apply { setProperty("SUPABASE_URL", "untrusted") },
+                localProps = Properties(),
+                embeddedProps = Properties().apply { setProperty("SUPABASE_URL", "embedded") },
             ),
         )
     }

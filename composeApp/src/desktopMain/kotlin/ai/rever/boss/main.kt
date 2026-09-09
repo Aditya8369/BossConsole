@@ -279,6 +279,15 @@ fun main(args: Array<String>) {
 
     logger.info(LogCategory.SYSTEM, "BOSS starting up")
 
+    // Single-instance check: ensure only one BOSS instance runs
+    if (!SingleInstanceManager.acquireLock()) {
+        logger.info(LogCategory.SYSTEM, "Another BOSS instance is already running")
+        val forwarded = CliBootstrap.forwardToExistingInstance(args)
+        exitProcess(if (forwarded) 0 else 1)
+    }
+
+    // A forwarding launch must never bind the kernel socket or spawn a second service cohort.
+    // Saved KERNEL mode applies to later OS file/link launches too.
     // Initialize microkernel infrastructure (no-op in MONOLITH mode)
     val kernelBootstrap: Any? =
         try {
@@ -300,13 +309,6 @@ fun main(args: Array<String>) {
         } catch (_: NoClassDefFoundError) {
             null
         }
-
-    // Single-instance check: ensure only one BOSS instance runs
-    if (!SingleInstanceManager.acquireLock()) {
-        logger.info(LogCategory.SYSTEM, "Another BOSS instance is already running")
-        val forwarded = CliBootstrap.forwardToExistingInstance(args)
-        exitProcess(if (forwarded) 0 else 1)
-    }
 
     // -------------------------------------------------------------------------
     // Phase 5: Shutdown hook registration
