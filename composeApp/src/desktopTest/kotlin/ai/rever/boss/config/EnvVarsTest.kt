@@ -22,4 +22,15 @@ class EnvVarsTest {
         val values = parseEnvVars(listOf("BOSS_MODE=KERNEL", "  # BOSS_MODE=KERNEL", "BOSS_MODE=MONOLITH"))
         assertEquals("MONOLITH", values.getProperty("BOSS_MODE"))
     }
+
+    @Test
+    fun `writer round trips duplicate and tab indented keys without damaging other keys`() {
+        val lines = listOf("BOSS_MODE=KERNEL", "\tBOSS_MODE = KERNEL", "BOSS_MODE_EXTRA=keep", "# BOSS_MODE=KERNEL")
+        val disabled = withSavedBossMode(lines, false)
+        assertEquals(null, parseEnvVars(disabled).getProperty("BOSS_MODE"))
+        assertEquals("keep", parseEnvVars(disabled).getProperty("BOSS_MODE_EXTRA"))
+        val enabled = withSavedBossMode(disabled, true)
+        assertEquals("KERNEL", parseEnvVars(enabled).getProperty("BOSS_MODE"))
+        assertEquals(1, enabled.count { it == "BOSS_MODE=KERNEL" })
+    }
 }

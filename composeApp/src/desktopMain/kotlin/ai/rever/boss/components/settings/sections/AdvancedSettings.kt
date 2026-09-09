@@ -196,35 +196,6 @@ private suspend fun readBossMode(): Boolean =
 
 private suspend fun writeBossMode(enabled: Boolean) =
     withContext(Dispatchers.IO) {
-        val envFile = BossDirectories.resolve("env_vars")
-        envFile.parentFile?.mkdirs()
-
-        if (!envFile.exists()) {
-            // Create with just BOSS_MODE
-            envFile.writeText(
-                if (enabled) "BOSS_MODE=KERNEL\n" else "# BOSS_MODE=KERNEL\n",
-                Charsets.UTF_8,
-            )
-            return@withContext
-        }
-
-        val lines = envFile.readLines(Charsets.UTF_8).toMutableList()
-        val modeLineIndex =
-            lines.indexOfFirst { line ->
-                val trimmed = line.trimStart('#', ' ')
-                trimmed.startsWith("BOSS_MODE")
-            }
-
-        val newLine = if (enabled) "BOSS_MODE=KERNEL" else "# BOSS_MODE=KERNEL"
-
-        if (modeLineIndex >= 0) {
-            lines[modeLineIndex] = newLine
-        } else {
-            // Add after last non-empty line
-            lines.add("")
-            lines.add("# Microkernel mode - enables out-of-process plugins, gRPC IPC, and AI self-healing")
-            lines.add(newLine)
-        }
-
-        envFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
+        ai.rever.boss.config
+            .writeSavedBossMode(enabled)
     }

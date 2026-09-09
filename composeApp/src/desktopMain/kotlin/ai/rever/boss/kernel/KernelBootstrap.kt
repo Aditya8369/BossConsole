@@ -270,7 +270,7 @@ private fun notifyOperator(
 ) {
     notifyLogger.warn("Repair for {} needs operator attention: {}", processId, summary)
     ai.rever.boss.startup.kernelStartupNotices
-        .report("$processId needs attention: $summary")
+        .report("$processId needs attention: $summary", source = processId)
 }
 
 /** What the kernel does about a crashed child once the orchestrator has had its say. */
@@ -868,7 +868,7 @@ class KernelBootstrap(
         val summary = serviceStartupSummary(spawnedCount, missingJars, failedSpawns)
         logger.info(summary)
         ai.rever.boss.startup.kernelStartupNotices
-            .report(summary)
+            .report(summary, source = "startup")
     }
 
     /**
