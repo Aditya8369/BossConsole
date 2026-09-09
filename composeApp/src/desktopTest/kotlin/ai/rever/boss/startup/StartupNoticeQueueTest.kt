@@ -2,6 +2,8 @@ package ai.rever.boss.startup
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
@@ -17,5 +19,16 @@ class StartupNoticeQueueTest {
             delay(60_000)
             assertEquals("missing auth", queue.notices.first())
             assertNull(withTimeoutOrNull(100) { queue.notices.first() })
+        }
+
+    @Test
+    fun `multiple diagnostics survive and are paced`() =
+        runTest {
+            val queue = StartupNoticeQueue()
+            queue.report("missing auth")
+            queue.report("restart cap")
+            val received = queue.notices.take(2).toList()
+            assertEquals(listOf("missing auth", "restart cap"), received)
+            assertEquals(12_000L, testScheduler.currentTime)
         }
 }

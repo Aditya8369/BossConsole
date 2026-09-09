@@ -262,16 +262,15 @@ private val notifyLogger = LoggerFactory.getLogger("KernelRepairNotice")
 /**
  * Surface a repair the operator has to decide on, using the same toast plugin crashes use.
  *
- * Logged as well as shown: a service can die before the window exists, and `showMessage` posts to a
- * flow that nobody is collecting yet — the notice would otherwise be lost with no trace.
+ * Logged and queued: services can exhaust recovery before login creates a window collector.
  */
 private fun notifyOperator(
     processId: String,
     summary: String,
 ) {
     notifyLogger.warn("Repair for {} needs operator attention: {}", processId, summary)
-    ai.rever.boss.components.bars.horizontal.StatusMessageManager
-        .showMessage("$processId needs attention: $summary", durationMs = 10_000)
+    ai.rever.boss.startup.kernelStartupNotices
+        .report("$processId needs attention: $summary")
 }
 
 /** What the kernel does about a crashed child once the orchestrator has had its say. */

@@ -186,13 +186,9 @@ private suspend fun readBossMode(): Boolean =
         val envFile = BossDirectories.resolve("env_vars")
         if (!envFile.exists()) return@withContext false
         try {
-            envFile
-                .readLines(Charsets.UTF_8)
-                .filter { it.isNotBlank() && !it.startsWith("#") }
-                .any { line ->
-                    val parts = line.split("=", limit = 2)
-                    parts.size == 2 && parts[0].trim() == "BOSS_MODE" && parts[1].trim() == "KERNEL"
-                }
+            ai.rever.boss.config
+                .parseEnvVars(envFile.readLines(Charsets.UTF_8))
+                .getProperty("BOSS_MODE") == "KERNEL"
         } catch (_: Exception) {
             false
         }

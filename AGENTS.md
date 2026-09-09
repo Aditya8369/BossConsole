@@ -397,7 +397,8 @@ MACOS_DEVELOPER_ID=Developer ID Application: ...  # Optional, signs local packag
 
 **Priority**: Environment variables > System properties > local.properties > Embedded build config.
 For `BOSS_MODE` only, the `env_vars` file is consulted between system properties and
-local.properties. This is the process-mode menu's plain, unquoted `KEY=value` format
+local.properties. Reader and settings writers use `BossDirectories.resolve("env_vars")`;
+`BOSS_DATA_DIR` does not redirect this preferences file. This is the process-mode menu's plain, unquoted `KEY=value` format
 (no shell `export` syntax); other keys in that file cannot override host configuration.
 
 ### Credential brokers

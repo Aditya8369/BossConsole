@@ -31,17 +31,14 @@ object ConfigLoader {
     }
 
     /**
-     * Loads properties from the $BOSS_DATA_DIR/env_vars file if it exists.
+     * Loads properties from the same BossDirectories env_vars file used by the settings writers if it exists.
      * This is where user settings like BOSS_MODE=KERNEL are saved.
      */
     private fun loadEnvVars() {
         try {
-            val bossDataDir =
-                System.getenv("BOSS_DATA_DIR").orNullIfBlank()
-                    ?: System.getProperty("boss.data.dir").orNullIfBlank()
-                    ?: ai.rever.boss.plugin.pathutils.BossDirectories.rootDir.absolutePath
-
-            val envVarsFile = File(bossDataDir, "env_vars")
+            val envVarsFile =
+                ai.rever.boss.plugin.pathutils.BossDirectories
+                    .resolve("env_vars")
             if (envVarsFile.exists()) {
                 logger.debug(LogCategory.SYSTEM, "Loading env_vars", mapOf("path" to envVarsFile.absolutePath))
                 envVarsProperties.putAll(parseEnvVars(envVarsFile.readLines(Charsets.UTF_8)))

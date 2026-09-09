@@ -397,7 +397,13 @@ class ReapChildrenTest {
     fun `caller cancellation is not reported as successful plugin termination`() =
         kotlinx.coroutines.runBlocking {
             val destroyed = java.util.concurrent.CountDownLatch(1)
-            val process = FakeProcess(920, ignoreDestroys = 1, onDestroy = { destroyed.countDown() })
+            val process =
+                FakeProcess(
+                    920,
+                    ignoreDestroys = 1,
+                    onDestroy = { destroyed.countDown() },
+                    delayedForce = true,
+                )
             val spawner =
                 ai.rever.boss.components.plugin.OutOfProcessPluginSpawnerImpl(
                     ai.rever.boss.process
@@ -421,6 +427,7 @@ class ReapChildrenTest {
                 job.join()
                 assertEquals(null, outcome.get())
                 assertTrue(process.forciblyKilled)
+                assertFalse(process.isAlive)
             } finally {
                 job.cancel()
                 job.join()

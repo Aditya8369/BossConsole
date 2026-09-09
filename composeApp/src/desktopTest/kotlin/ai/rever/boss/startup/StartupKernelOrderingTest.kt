@@ -12,7 +12,7 @@ class StartupKernelOrderingTest {
                 .first { File(it, "settings.gradle.kts").isFile }
         val main = File(root, "composeApp/src/desktopMain/kotlin/ai/rever/boss/main.kt").readText()
         val lock = main.indexOf("if (!SingleInstanceManager.acquireLock())")
-        val kernel = main.indexOf("val kernelBootstrap: Any?")
+        val kernel = main.indexOf("getMethod(\"initialize\")")
         assertTrue(lock >= 0 && kernel > lock)
         assertTrue(main.substring(lock, kernel).contains("exitProcess("))
     }
