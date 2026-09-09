@@ -216,6 +216,21 @@ object IpcAddressResolver {
     }
 
     /**
+     * Release cached port allocation or socket file for a given process identity.
+     */
+    fun releaseAddress(
+        processType: String,
+        processId: String,
+    ) {
+        if (isWindows) {
+            tcpPortCache.remove("$processType:$processId")
+        } else {
+            val socketFile = File(ipcDir, "boss-$processType-$processId.sock")
+            socketFile.delete()
+        }
+    }
+
+    /**
      * Set owner-only (0700) permissions on a Unix domain socket file after the server starts.
      * Prevents other local users from connecting to the IPC socket.
      */

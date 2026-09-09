@@ -24,6 +24,7 @@ class ConfigLoaderTest {
     private fun resolve(
         env: String? = null,
         sysProp: String? = null,
+        envVars: String? = null,
         local: String? = null,
         embedded: String? = null,
         default: String? = null,
@@ -32,6 +33,7 @@ class ConfigLoaderTest {
         defaultValue = default,
         envValue = env,
         sysPropValue = sysProp,
+        envVarsProps = props(envVars),
         localProps = props(local),
         embeddedProps = props(embedded),
     )
@@ -40,7 +42,7 @@ class ConfigLoaderTest {
     fun `env wins over all other tiers`() {
         assertEquals(
             "from-env",
-            resolve(env = "from-env", sysProp = "x", local = "x", embedded = "x", default = "x"),
+            resolve(env = "from-env", sysProp = "x", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
@@ -48,12 +50,20 @@ class ConfigLoaderTest {
     fun `system property wins below env`() {
         assertEquals(
             "from-sysprop",
-            resolve(sysProp = "from-sysprop", local = "x", embedded = "x", default = "x"),
+            resolve(sysProp = "from-sysprop", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
     @Test
-    fun `local properties win below system property`() {
+    fun `envVars properties win below system property`() {
+        assertEquals(
+            "from-envvars",
+            resolve(envVars = "from-envvars", local = "x", embedded = "x", default = "x"),
+        )
+    }
+
+    @Test
+    fun `local properties win below envVars properties`() {
         assertEquals(
             "from-local",
             resolve(local = "from-local", embedded = "x", default = "x"),

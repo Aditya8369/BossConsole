@@ -203,6 +203,7 @@ class OutOfProcessPluginSpawnerImpl(
         // Kill first, drop the registry entry second: while the child is alive the registry entry
         // is the only thing that would let a host exit reap it.
         val process = managedProcesses.remove(pluginId)
+        runCatching { process?.process?.toHandle()?.descendants()?.forEach { desc -> runCatching { desc.destroyForcibly() } } }
         runCatching { process?.destroyForcibly() }
         process?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
     }
@@ -226,6 +227,7 @@ class OutOfProcessPluginSpawnerImpl(
                 // Destroy process
                 if (process != null) {
                     logger.info("Terminating plugin process: id={}, pid={}", pluginId, process.pid)
+                    runCatching { process.process.toHandle().descendants().forEach { desc -> runCatching { desc.destroyForcibly() } } }
                     process.destroy()
 
                     // Wait for graceful shutdown, then force kill
@@ -241,6 +243,7 @@ class OutOfProcessPluginSpawnerImpl(
                 Result.success(Unit)
             } catch (e: Exception) {
                 // Force kill if graceful shutdown failed
+                runCatching { process?.process?.toHandle()?.descendants()?.forEach { desc -> runCatching { desc.destroyForcibly() } } }
                 process?.destroyForcibly()
                 logger.warn("Force-killed plugin process: id={}", pluginId, e)
                 Result.success(Unit)

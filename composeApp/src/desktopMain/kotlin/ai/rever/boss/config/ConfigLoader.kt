@@ -13,6 +13,8 @@ object ConfigLoader {
     private val logger = BossLogger.forComponent("ConfigLoader")
     private val properties = Properties()
 
+    private val envVarsProperties = Properties()
+
     /**
      * Config baked into the app at build time by the generateEmbeddedConfig
      * Gradle task (from CI secrets or the developer's local.properties). This
@@ -23,8 +25,54 @@ object ConfigLoader {
     private val embeddedProperties = Properties()
 
     init {
+        loadEnvVars()
         loadLocalProperties()
         loadEmbeddedProperties()
+    }
+
+    /**
+     * Loads properties from the $BOSS_DATA_DIR/env_vars file if it exists.
+     * This is where user settings like BOSS_MODE=KERNEL are saved.
+     */
+    private fun loadEnvVars() {
+        try {
+            val bossDataDir =
+                System.getenv("BOSS_DATA_DIR")
+                    ?: System.getProperty("boss.data.dir")
+                    ?: try {
+                        val dirsCls = Class.forName("ai.rever.boss.plugin.pathutils.BossDirectories")
+                        val dirsInst = dirsCls.getDeclaredField("INSTANCE").get(null)
+                        val rootDir = dirsCls.getMethod("getRootDir").invoke(dirsInst) as File
+                        rootDir.absolutePath
+                    } catch (_: Exception) {
+                        "${System.getProperty("user.home")}/.boss"
+                    }
+
+            val envVarsFile = File(bossDataDir, "env_vars")
+            if (envVarsFile.exists()) {
+                logger.debug(LogCategory.SYSTEM, "Loading env_vars", mapOf("path" to envVarsFile.absolutePath))
+                envVarsFile.readLines(Charsets.UTF_8).forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                        val parts = trimmed.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val key = parts[0].trim()
+                            val value = parts[1].trim()
+                            if (key.isNotEmpty() && value.isNotEmpty()) {
+                                envVarsProperties.setProperty(key, value)
+                            }
+                        }
+                    }
+                }
+                logger.debug(
+                    LogCategory.SYSTEM,
+                    "Loaded properties from env_vars",
+                    mapOf("count" to envVarsProperties.size.toString()),
+                )
+            }
+        } catch (e: Exception) {
+            logger.warn(LogCategory.SYSTEM, "Could not load env_vars", error = e)
+        }
     }
 
     /**
@@ -90,9 +138,10 @@ object ConfigLoader {
      * Gets a configuration value from the following sources in order:
      * 1. System environment variable
      * 2. System property
-     * 3. local.properties file
-     * 4. Embedded build config (baked in at build time from CI secrets)
-     * 5. Default value
+     * 3. env_vars file (~/.boss/env_vars)
+     * 4. local.properties file
+     * 5. Embedded build config (baked in at build time from CI secrets)
+     * 6. Default value
      */
     fun getConfig(
         key: String,
@@ -103,6 +152,7 @@ object ConfigLoader {
             defaultValue = defaultValue,
             envValue = System.getenv(key),
             sysPropValue = System.getProperty(key),
+            envVarsProps = envVarsProperties,
             localProps = properties,
             embeddedProps = embeddedProperties,
         )
@@ -116,11 +166,13 @@ object ConfigLoader {
         defaultValue: String?,
         envValue: String?,
         sysPropValue: String?,
+        envVarsProps: Properties = Properties(),
         localProps: Properties,
         embeddedProps: Properties,
     ): String? =
         envValue.orNullIfBlank()
             ?: sysPropValue.orNullIfBlank()
+            ?: envVarsProps.getProperty(key).orNullIfBlank()
             ?: localProps.getProperty(key).orNullIfBlank()
             ?: embeddedProps.getProperty(key).orNullIfBlank()
             // NOT blank-filtered: a caller that passes "" as its default has said so explicitly,
