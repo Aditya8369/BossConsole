@@ -235,6 +235,7 @@ class OutOfProcessPluginSpawnerImpl(
                     .processDescendants(process?.process),
             )
         runCatching { process?.destroyForcibly() }
+        awaitForcedExit(process)
         process?.takeUnless { it.isAlive }?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
     }
 
@@ -278,6 +279,7 @@ class OutOfProcessPluginSpawnerImpl(
 
                 Result.success(Unit)
             } catch (e: CancellationException) {
+                // Termination already owns cleanup: cancellation must not orphan this subtree.
                 runCatching { process?.destroyForcibly() }
                 throw e
             } catch (e: Exception) {
@@ -292,6 +294,7 @@ class OutOfProcessPluginSpawnerImpl(
                 // implies reapable" has to hold for as long as the child is alive, so a host exit
                 // part-way through an unload still reaps it; and removing by id alone could evict
                 // a replacement that a concurrent respawn had already registered.
+                awaitForcedExit(process)
                 process?.takeUnless { it.isAlive }?.let {
                     kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it)
                 }
@@ -417,3 +420,8 @@ private fun processIdOf(pluginId: String): String = "plugin-$pluginId"
  * `KernelBootstrap.instance`, so the instance and its registry both exist before this class does.
  */
 private fun kernelRegistry(): ProcessRegistry? = KernelBootstrap.instance?.processRegistry
+
+private fun awaitForcedExit(process: ai.rever.boss.process.ManagedProcess?) {
+    // SIGKILL is asynchronous. Preserve a still-live handle after this bounded wait.
+    runCatching { process?.process?.waitFor(100, java.util.concurrent.TimeUnit.MILLISECONDS) }
+}

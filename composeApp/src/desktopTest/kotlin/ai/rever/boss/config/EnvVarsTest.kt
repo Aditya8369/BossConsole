@@ -16,4 +16,10 @@ class EnvVarsTest {
         assertEquals(1, values.size)
         assertEquals("value=tail", values.getProperty("A"))
     }
+
+    @Test
+    fun `saved mode uses the last active assignment`() {
+        val values = parseEnvVars(listOf("BOSS_MODE=KERNEL", "  # BOSS_MODE=KERNEL", "BOSS_MODE=MONOLITH"))
+        assertEquals("MONOLITH", values.getProperty("BOSS_MODE"))
+    }
 }
