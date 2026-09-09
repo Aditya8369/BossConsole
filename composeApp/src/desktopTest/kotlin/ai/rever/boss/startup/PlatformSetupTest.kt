@@ -86,6 +86,7 @@ class PlatformSetupTest {
                             var remaining = 9000
 
                             override fun read(): Int {
+                                kotlin.test.assertFalse(File(tempDir, "linux/x86-64/libpty.so").exists())
                                 if (--remaining < 0) throw java.io.IOException("interrupted copy")
                                 return 65
                             }
@@ -97,6 +98,7 @@ class PlatformSetupTest {
             PlatformSetup.extractPty4jNatives(tempDir, "linux", "amd64", loader)
             val native = File(tempDir, "linux/x86-64/libpty.so")
             kotlin.test.assertFalse(native.exists())
+            File(tempDir, "linux/x86-64/libpty.so.part").writeText("orphaned partial")
             fail = false
             PlatformSetup.extractPty4jNatives(tempDir, "linux", "amd64", loader)
             assertEquals("complete-native", native.readText())

@@ -179,16 +179,23 @@ object PlatformSetup {
                     "native/$platformPath/$libName",
                 )
 
+            val partialNative = File(platformDir, "$libName.part")
             var extracted = false
             for (resource in nativeResources) {
                 try {
                     val resourceStream = classLoader.getResourceAsStream(resource)
                     if (resourceStream != null) {
                         resourceStream.use { input ->
-                            libptyFile.outputStream().use { output ->
+                            partialNative.outputStream().use { output ->
                                 input.copyTo(output)
                             }
                         }
+                        java.nio.file.Files.move(
+                            partialNative.toPath(),
+                            libptyFile.toPath(),
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        )
                         libptyFile.setExecutable(true)
                         logger.debug(
                             LogCategory.SYSTEM,
@@ -202,8 +209,8 @@ object PlatformSetup {
                         break
                     }
                 } catch (e: Exception) {
-                    // Never accept an interrupted copy as a cached native on the next launch.
-                    libptyFile.delete()
+                    // A leftover .part from an interrupted host is never accepted as a cached native.
+                    partialNative.delete()
                     logger.debug(
                         LogCategory.SYSTEM,
                         "PTY4J native extraction failed for resource - trying next",
@@ -215,7 +222,7 @@ object PlatformSetup {
             if (!extracted) {
                 logger.debug(
                     LogCategory.SYSTEM,
-                    "PTY4J natives not on host classpath (handled by terminal-tab plugin)",
+                    "PTY4J native unavailable; no candidate completed extraction (handled by terminal-tab plugin)",
                     mapOf(
                         "platform" to platformPath,
                         "searchedResources" to nativeResources.joinToString(),
