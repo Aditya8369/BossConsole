@@ -78,9 +78,15 @@ object ShutdownSequence {
     fun execute(
         steps: List<ShutdownStep>,
         releaseLock: () -> Unit = { SingleInstanceManager.release() },
+    ) = executePrepared({ steps }, releaseLock)
+
+    @Suppress("TooGenericExceptionCaught")
+    internal fun executePrepared(
+        prepareSteps: () -> List<ShutdownStep>,
+        releaseLock: () -> Unit = { SingleInstanceManager.release() },
     ) {
         try {
-            for (step in steps) {
+            for (step in prepareSteps()) {
                 try {
                     step.action()
                 } catch (e: Throwable) {
@@ -103,7 +109,7 @@ object ShutdownSequence {
         val hookThread =
             Thread(
                 {
-                    execute(defaultSteps(kernelBootstrapProvider))
+                    executePrepared({ defaultSteps(kernelBootstrapProvider) })
                 },
                 "boss-shutdown-hook",
             )

@@ -202,6 +202,8 @@ object PlatformSetup {
                         break
                     }
                 } catch (e: Exception) {
+                    // Never accept an interrupted copy as a cached native on the next launch.
+                    libptyFile.delete()
                     logger.debug(
                         LogCategory.SYSTEM,
                         "PTY4J native extraction failed for resource - trying next",

@@ -56,4 +56,17 @@ class ShutdownSequenceTest {
             stepNames,
         )
     }
+
+    @Test
+    fun constructionFailureStillReleasesLock() {
+        var released = false
+        kotlin.test.assertFailsWith<LinkageError> {
+            ShutdownSequence.executePrepared(
+                prepareSteps = { throw LinkageError("construction") },
+                releaseLock = { released = true },
+            )
+        }
+        assertTrue(released)
+        ShutdownSequence.execute(emptyList(), releaseLock = { throw LinkageError("release") })
+    }
 }

@@ -70,4 +70,35 @@ class PlatformSetupTest {
             tempDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun failedCopyDoesNotPoisonNextLaunch() {
+        val tempDir = createTempDirectory("pty4j_failed_copy").toFile()
+        var fail = true
+        val loader =
+            object : ClassLoader(null) {
+                override fun getResourceAsStream(name: String): java.io.InputStream? {
+                    if (name != "native/linux/x86-64/libpty.so") return null
+                    if (!fail) return ByteArrayInputStream("complete-native".toByteArray())
+                    return object : java.io.InputStream() {
+                        var remaining = 9000
+
+                        override fun read(): Int {
+                            if (--remaining < 0) throw java.io.IOException("interrupted copy")
+                            return 65
+                        }
+                    }
+                }
+            }
+        try {
+            PlatformSetup.extractPty4jNatives(tempDir, "linux", "amd64", loader)
+            val native = File(tempDir, "linux/x86-64/libpty.so")
+            kotlin.test.assertFalse(native.exists())
+            fail = false
+            PlatformSetup.extractPty4jNatives(tempDir, "linux", "amd64", loader)
+            assertEquals("complete-native", native.readText())
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
 }
