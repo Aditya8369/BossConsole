@@ -1,5 +1,6 @@
 package ai.rever.boss.mcp
 
+import ai.rever.boss.mcp.sandbox.McpRiskAssessment
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
 import kotlinx.coroutines.CompletableDeferred
@@ -41,6 +42,7 @@ data class McpApprovalRequest(
     val providerId: String,
     val arguments: Map<String, Any?>,
     val timeoutMs: Long,
+    val riskAssessment: McpRiskAssessment? = null,
     val requestedAt: Long = System.currentTimeMillis(),
     val deferred: CompletableDeferred<McpApprovalDecision> = CompletableDeferred(),
 )
@@ -77,6 +79,7 @@ open class McpApprovalBus(
         providerId: String,
         arguments: Map<String, Any?>,
         timeoutMs: Long = defaultTimeoutMs,
+        riskAssessment: McpRiskAssessment? = null,
     ): McpApprovalDecision {
         val request =
             McpApprovalRequest(
@@ -84,6 +87,7 @@ open class McpApprovalBus(
                 providerId = providerId,
                 arguments = McpArgumentSanitizer.sanitize(arguments),
                 timeoutMs = timeoutMs,
+                riskAssessment = riskAssessment,
             )
 
         synchronized(lock) {

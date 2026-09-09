@@ -1040,5 +1040,8 @@ and restarting. Preserve a backup before manual recovery of a damaged policy;
 the fault flow withholds all tools until recovery. No automatic quarantine UI is
 provided. Ledger redaction is bounded and best effort, not a guarantee for secrets
 under arbitrary keys. Queue overflow and cancellation before/after dispatch have
-distinct ledger dispositions. These controls require deliberate integration with
-the alternative #336 and #362 registry interceptors before shipping together.
+distinct ledger dispositions. Risk classification from #336 feeds this same policy and approval path; there is
+no second sandbox prompt. Explicit policies and session trust retain precedence.
+HIGH/CRITICAL names use the mutating default, while unknown names remain allowed
+by default. Risk reasons and sanitized arguments appear together in the existing
+approval dialog. #362 is closed pending extraction into a management plugin.

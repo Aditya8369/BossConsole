@@ -185,6 +185,15 @@ fun McpApprovalDialog(
                     }
                 }
 
+                request.riskAssessment?.let { assessment ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "${assessment.level}: ${assessment.reason}",
+                        fontSize = 12.sp,
+                        color = colors.alert,
+                    )
+                }
+
                 if (isMutating) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(

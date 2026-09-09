@@ -1,6 +1,7 @@
 package ai.rever.boss.mcp
 
 import ai.rever.boss.components.bars.horizontal.StatusMessageManager
+import ai.rever.boss.mcp.sandbox.DefaultMcpRiskEvaluator
 import ai.rever.boss.plugin.api.McpToolArgs
 import ai.rever.boss.plugin.api.McpToolDefinition
 import ai.rever.boss.plugin.api.McpToolProvider
@@ -742,6 +743,7 @@ internal class McpToolRegistryCore(
                             tool.definition.name,
                             tool.providerId,
                             McpArgumentSanitizer.parseArguments(args.raw),
+                            riskAssessment = DefaultMcpRiskEvaluator().evaluateRisk(tool.definition.name, args),
                         )
                 ) {
                     is McpApprovalDecision.Approved -> {
