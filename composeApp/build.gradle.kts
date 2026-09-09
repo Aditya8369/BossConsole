@@ -930,6 +930,7 @@ kotlin {
             implementation(projects.pluginPlatform.pluginWorkspaceTypes)
             implementation(projects.pluginPlatform.pluginBookmarkTypes)
             implementation(projects.pluginPlatform.pluginIcons)
+            implementation(projects.pluginPlatform.pluginLanguageTypes)
             implementation(projects.pluginPlatform.pluginPathUtils)
             implementation(projects.pluginPlatform.pluginSandbox)
 
