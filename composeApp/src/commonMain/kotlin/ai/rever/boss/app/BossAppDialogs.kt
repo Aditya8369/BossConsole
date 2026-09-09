@@ -6,6 +6,7 @@ import ai.rever.boss.components.dialogs.ConfirmationDialog
 import ai.rever.boss.components.dialogs.GlobalSearchDialog
 import ai.rever.boss.components.dialogs.HtmlFileOpenDialog
 import ai.rever.boss.components.dialogs.LogoutConfirmationDialog
+import ai.rever.boss.components.dialogs.McpApprovalDialog
 import ai.rever.boss.components.dialogs.NewProjectWizardDialog
 import ai.rever.boss.components.dialogs.NewTabDialog
 import ai.rever.boss.components.dialogs.ProjectOpenModeDialog
@@ -47,6 +48,7 @@ import ai.rever.boss.html.HtmlFileSettingsManager
 import ai.rever.boss.icons.FileIcons
 import ai.rever.boss.keymap.KeymapSettingsManager
 import ai.rever.boss.keymap.model.KeymapActions
+import ai.rever.boss.mcp.McpToolRegistryImpl
 import ai.rever.boss.platform.rememberDirectoryPicker
 import ai.rever.boss.plugin.api.Panel.Companion.left
 import ai.rever.boss.plugin.api.Panel.Companion.top
@@ -796,6 +798,21 @@ internal fun BossAppDialogs(state: BossAppState) {
                 )
                 splitViewState.openTerminalInActivePanel(pending.command, pending.workingDirectory)
                 DashboardStatsManager.recordTerminalSession()
+            },
+        )
+    }
+
+    // Interactive approval dialog for governed MCP tools invoked by an AI agent
+    state.pendingMcpApproval?.let { approvalRequest ->
+        val pendingList by McpToolRegistryImpl.approvalBus.pendingList.collectAsState()
+        McpApprovalDialog(
+            request = approvalRequest,
+            pendingQueueSize = pendingList.size,
+            onApprove = { trustForSession ->
+                McpToolRegistryImpl.approvalBus.approve(approvalRequest.id, trustForSession)
+            },
+            onDeny = { reason ->
+                McpToolRegistryImpl.approvalBus.deny(approvalRequest.id, reason)
             },
         )
     }
