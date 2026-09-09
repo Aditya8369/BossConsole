@@ -17,7 +17,7 @@ class ShutdownSequenceTest {
                 },
                 ShutdownStep("failing step 2") {
                     executionLog.add("step2")
-                    error("Simulated failure in step 2")
+                    throw LinkageError("Simulated linkage failure in step 2")
                 },
                 ShutdownStep("step 3") {
                     executionLog.add("step3")
@@ -40,9 +40,20 @@ class ShutdownSequenceTest {
         val steps = ShutdownSequence.defaultSteps()
         val stepNames = steps.map { it.name }
 
-        assertTrue(stepNames.any { it.contains("Last Session") })
-        assertTrue(stepNames.any { it.contains("browser engine") })
-        assertTrue(stepNames.any { it.contains("logger") })
-        assertTrue(stepNames.any { it.contains("plugin store") })
+        assertEquals(
+            listOf(
+                "saving Last Session on exit",
+                "stopping performance monitor",
+                "closing browser engine",
+                "closing favicon HTTP client",
+                "uninstalling keyboard interceptor",
+                "stopping app update realtime",
+                "shutting down updater",
+                "shutting down plugin store",
+                "shutting down logger",
+                "shutting down kernel",
+            ),
+            stepNames,
+        )
     }
 }

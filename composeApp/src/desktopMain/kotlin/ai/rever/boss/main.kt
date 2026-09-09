@@ -108,9 +108,16 @@ private fun quarantineBlamedPlugin(
         ),
         throwable,
     )
-    CrashHandler.recordContained(throwable)
+    // Written to disk rather than raised as a dialog: the session survives, and a
+    // crash we recovered from has no business interrupting the user. Same
+    // reasoning as containRenderFault.
+    ai.rever.boss.crash.CrashHandler
+        .recordContained(throwable)
     if (pluginId.isNotBlank()) {
-        PluginCrashRegistry.recordCrash(pluginId, throwable)
+        // notify = true: this is the only message the user will get, and unlike a
+        // contained render fault there is a named plugin to put in it.
+        ai.rever.boss.plugin.sandbox.ui.PluginCrashRegistry
+            .recordCrash(pluginId, throwable)
     }
 }
 
@@ -134,13 +141,31 @@ private fun containRenderFault(
         ),
         throwable,
     )
-    CrashHandler.recordContained(throwable)
+    // Reported, but not through CrashHandler.handleCrash: a fault the render path
+    // has already contained and recovered from must not interrupt the user to ask
+    // about it. (That dialog was also terminal on every exit; a plugin-attributed
+    // crash now recovers instead, but a contained fault still has no business
+    // opening it.)
+    // recordContained writes the report to disk instead, so a host-side render bug
+    // stays visible rather than costing one log line and a toast.
+    ai.rever.boss.crash.CrashHandler
+        .recordContained(throwable)
+    // Keeping the window alive is not enough on its own: a repaint over a subtree
+    // that still reproduces the fault leaves a broken window and no explanation.
     val outcome = PluginRenderRecovery.onUnattributedRenderException(throwable)
+    // Shared with the seam test so both exercise the same pairing — see
+    // noteRecoveryOutcome.
     val madeProgress = noteRecoveryOutcome(policy, outcome)
 
+    // Telling the user and un-counting the fault are separate decisions; every
+    // attempt to derive one from the other has regressed the other. The toaster
+    // owns this one, and is tested — see RenderRecoveryToaster.
     renderRecoveryToaster.toastFor(outcome, now = System.nanoTime() / 1_000_000)?.let { message ->
         StatusMessageManager.showMessage(message, durationMs = RENDER_RECOVERY_TOAST_MILLIS)
     }
+    // The repaint stays on progress only: it is a full sweep of every window, and
+    // during a storm it arguably feeds the fault it is responding to. Nothing to
+    // repaint for a verdict that changed nothing.
     if (madeProgress) {
         Window.getWindows().forEach { it.repaint() }
     }
@@ -292,6 +317,8 @@ fun main(args: Array<String>) {
     // -------------------------------------------------------------------------
     // Phase 6: Overlays, window nets & Chromium engine preparation
     // -------------------------------------------------------------------------
+    // After headless exits and rendering properties: installing the AWT listener creates the
+    // toolkit, which reads those properties once. Before any application window can open.
     DefaultWindowIcon.install()
 
     startupScope.launch(Dispatchers.IO) {
@@ -308,6 +335,7 @@ fun main(args: Array<String>) {
     CliBootstrap.dispatchPostLock(args)
 
     AWTKeyboardInterceptor.install()
+    // macOS already read the theme before AWT; other platforms still need this initialization.
     AppThemeSettingsManager.ensureInitialized()
     PasskeyPlatformInit.initialize()
     SettingsSearchIndex.registerWithGlobalSearch()
@@ -367,15 +395,24 @@ fun main(args: Array<String>) {
     )
 
     // -------------------------------------------------------------------------
+    // No PSI or ProjectIndexer lifecycle here: indexing user.dir on a Finder launch can walk
+    // the entire disk. Project indexing belongs to the editor plugin's project lifecycle.
     // Phase 8: Compose Application Entry & Window Loop
     // -------------------------------------------------------------------------
     application {
+        // Provide a custom WindowExceptionHandlerFactory that intercepts plugin crashes
+        // during composition. Compose's default factory shows an error dialog and disposes
+        // the window, which bypasses our UncaughtExceptionHandler-based interceptor.
         @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
         val defaultExceptionHandlerFactory = LocalWindowExceptionHandlerFactory.current
 
+        // Shared across windows on purpose: a corrupted scene tends to throw from
+        // whichever window repaints next, and the question being asked is "is this
+        // app still rendering?", not "is this window still rendering?".
         val renderCrashPolicy =
             remember {
-                RenderCrashPolicy()
+                ai.rever.boss.crash
+                    .RenderCrashPolicy()
             }
 
         @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
@@ -385,7 +422,12 @@ fun main(args: Array<String>) {
                     override fun exceptionHandler(window: java.awt.Window): WindowExceptionHandler {
                         val defaultHandler = defaultExceptionHandlerFactory.exceptionHandler(window)
                         return WindowExceptionHandler { throwable ->
-                            val pluginId = PluginCrashInterceptor.attributeToPlugin(throwable)
+                            val pluginId =
+                                PluginCrashInterceptor.attributeToPlugin(throwable)
+                            // Not computed under an OOM. Blame walks the stack and
+                            // may call into the plugin manager, which allocates —
+                            // and a fatal heap is escalated regardless, so the
+                            // answer could not change the route anyway.
                             val blamedPluginId =
                                 if (pluginId != null || throwable.hasFatalCause()) {
                                     null
@@ -430,16 +472,17 @@ fun main(args: Array<String>) {
                     }
                 }
             }
-
         @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
         CompositionLocalProvider(
             LocalWindowExceptionHandlerFactory provides pluginAwareExceptionHandlerFactory,
         ) {
+            // State for Chromium download
             var isDownloadingChromium by remember { mutableStateOf(chromiumNeedsDownload) }
             var downloadProgress by remember {
                 mutableStateOf(ChromiumAutoDownloader.DownloadProgress(0, 0))
             }
 
+            // Show Chromium download dialog if needed
             if (isDownloadingChromium) {
                 val downloadWindowState =
                     rememberWindowState(
@@ -448,6 +491,8 @@ fun main(args: Array<String>) {
                         height = 220.dp,
                     )
 
+                // The error state adds a failure message plus Retry/Exit buttons; grow the
+                // window so they aren't clipped by the fixed 220dp height.
                 LaunchedEffect(downloadProgress.error != null) {
                     downloadWindowState.size =
                         DpSize(
@@ -461,15 +506,28 @@ fun main(args: Array<String>) {
                     state = downloadWindowState,
                     title = "BOSS - Setup",
                     resizable = false,
+                    // This is the one window that opens before any main window exists, so it can
+                    // inherit an icon from nothing - and it is the first thing a new user sees.
                     icon = BossWindowIcon.painter,
                 ) {
                     ApplyBossWindowIcon(window)
 
+                    // Start download when dialog opens
                     LaunchedEffect(Unit) {
                         ChromiumAutoDownloader.downloadChromium { progress ->
                             downloadProgress = progress
                             if (progress.isComplete) {
+                                // Download complete - create window and proceed
                                 WindowManager.createNewWindow()
+                                // The pre-warm was skipped at startup because the engine
+                                // was missing; now that it is installed, warm it so the
+                                // first tab does not pay the full boot.
+                                //
+                                // force, because it was skipped for a SECOND reason this
+                                // comment did not know about: the unforced gate wants an
+                                // existing browser profile, and a machine that has just
+                                // downloaded its engine has never had one. So this call
+                                // silently did nothing, on the one launch it was written for.
                                 runCatching {
                                     ai.rever.boss.plugin.browser.FluckEngine
                                         .prewarmInBackground(force = true)
@@ -490,6 +548,11 @@ fun main(args: Array<String>) {
                                 progress = downloadProgress.progressFraction,
                                 downloadedMB = downloadProgress.downloadedMB,
                                 totalMB = downloadProgress.totalMB,
+                                // Name the version being fetched. This dialog blocks
+                                // the whole app for a several-hundred-MB download, and
+                                // which engine it is turns out to be the first thing
+                                // anyone asks when it appears unexpectedly — an engine
+                                // mismatch is exactly what triggers it.
                                 status =
                                     ai.rever.boss.components.dialogs.engineDownloadStatus(
                                         engineLabel = engineLabel,
@@ -499,12 +562,17 @@ fun main(args: Array<String>) {
                                 error = downloadProgress.error,
                                 onCancel = { exitApplication() },
                                 onRetry = {
+                                    // Reset progress and retry
                                     downloadProgress = ChromiumAutoDownloader.DownloadProgress(0, 0)
                                     CoroutineScope(Dispatchers.IO).launch {
                                         ChromiumAutoDownloader.downloadChromium { progress ->
                                             downloadProgress = progress
                                             if (progress.isComplete) {
                                                 WindowManager.createNewWindow()
+                                                // Forced for the same reason as the first-attempt
+                                                // path above: a freshly downloaded engine has no
+                                                // browser profile yet, which the unforced gate reads
+                                                // as "this machine does not use the browser".
                                                 runCatching {
                                                     ai.rever.boss.plugin.browser.FluckEngine
                                                         .prewarmInBackground(force = true)
@@ -520,19 +588,38 @@ fun main(args: Array<String>) {
                 }
             }
 
+            // Initialize CLI handler once app is running (only after Chromium is ready)
             if (!isDownloadingChromium) {
                 LaunchedEffect(Unit) {
                     CLICommandHandler.getInstance().initialize(
                         windowManager = WindowManager,
-                        getSplitViewState = { null },
+                        getSplitViewState = {
+                            // Workspace loading now handled via WorkspaceManager from BossApp
+                            // No need to expose SplitViewState to CLI handler
+                            null
+                        },
                     )
                 }
 
+                // Render each window with stable identity via key()
+                // This prevents re-composition of existing windows when new windows are added
+                //
+                // IMPORTANT: No auto-creation logic here!
+                // When all windows close, app stays running (standard macOS behavior)
+                // User can create new windows via UI elements (+ button, File menu, etc.)
                 WindowManager.windows.forEach { windowState ->
                     key(windowState.id) {
                         BossWindow(
                             windowState = windowState,
                             onCloseRequest = {
+                                // Exit fullscreen/maximized BEFORE disposing browsers to prevent
+                                // SIGABRT crash in JxBrowser's getWindowHandle during macOS
+                                // fullscreen exit transition. requestToggleFullScreen() is async
+                                // (macOS Spaces animation takes ~300-500ms), so we add a brief
+                                // delay to let the transition start before disposing browsers.
+                                //
+                                // Blocking the UI thread here is acceptable: the app is closing
+                                // and the window is about to be destroyed anyway.
                                 val awtWindow =
                                     ai.rever.boss.utils.WindowFocusManager
                                         .getWindow(windowState.id)
@@ -550,7 +637,12 @@ fun main(args: Array<String>) {
                                         awtWindow.extendedState = java.awt.Frame.NORMAL
                                         needsTransitionWait = true
                                     }
-
+                                    // macOS native fullscreen uses Spaces, not AWT exclusive mode.
+                                    // requestToggleFullScreen is a TOGGLE — calling it when not
+                                    // fullscreen will ENTER fullscreen. We must detect whether the
+                                    // window is actually in native fullscreen before calling it.
+                                    // Detection: in native fullscreen, the window bounds match the
+                                    // full screen size (not the visible/usable area).
                                     val isMacOS = System.getProperty("os.name").lowercase().contains("mac")
                                     if (isMacOS) {
                                         val screenBounds =
@@ -590,7 +682,10 @@ fun main(args: Array<String>) {
                                             }
                                         }
                                     }
-
+                                    // Wait for fullscreen/maximize transition to start before
+                                    // disposing browsers. Both state changes are async on macOS.
+                                    // Using runBlocking{delay()} per THREADING.md guidelines;
+                                    // blocking is acceptable here since the window is closing.
                                     if (needsTransitionWait) {
                                         kotlinx.coroutines.runBlocking {
                                             kotlinx.coroutines.delay(150)
@@ -598,10 +693,17 @@ fun main(args: Array<String>) {
                                     }
                                 }
 
+                                // CRITICAL: Dispose all browsers BEFORE window close begins
+                                // This prevents JxBrowser OffScreenWidget crash when it tries to
+                                // access the window handle during Compose disposal
+                                // Must happen HERE, not in BossApp.onDispose, because:
+                                // - onCloseRequest runs BEFORE Compose disposal
+                                // - BossApp.onDispose runs DURING Compose disposal (too late!)
                                 ai.rever.boss.components.window_panel.SplitViewStateRegistry
                                     .getState(windowState.id)
                                     ?.disposeAllBrowsersBlocking()
 
+                                // Clean up runner terminal state to prevent memory leaks (Issue #498)
                                 ai.rever.boss.run.RunnerTerminalService
                                     .cleanupWindow(windowState.id)
                                 ai.rever.boss.services.terminal.TerminalAPIAccess
@@ -610,11 +712,171 @@ fun main(args: Array<String>) {
                                 WindowManager.closeWindow(windowState.id)
                                 ai.rever.boss.utils.WindowFocusManager
                                     .unregisterWindow(windowState.id)
+                                // Don't call exitApplication - keep app running (macOS style)
+                                // When window count reaches 0, app stays in Dock
+                                // User can quit via Cmd+Q or right-click Dock → Quit
                             },
                         )
                     }
                 }
             }
+        } // CompositionLocalProvider
+    }
+}
+
+private fun setupNativeLibraryPaths() {
+    // Ensure temp directories exist and are set properly
+    val bossDir = BossDirectories.rootDir
+    val tempDir = File(bossDir, "temp")
+    val pty4jDir = File(tempDir, "pty4j")
+
+    // Create directories if they don't exist
+    bossDir.mkdirs()
+    tempDir.mkdirs()
+    pty4jDir.mkdirs()
+
+    // Extract PTY4J native libraries from classpath if needed
+    extractPty4jNatives(pty4jDir)
+
+    // Set system properties for native libraries
+    System.setProperty("pty4j.tmpdir", pty4jDir.absolutePath)
+    System.setProperty("pty4j.preferred.native.folder", pty4jDir.absolutePath)
+
+    // Check if we're running from an app bundle
+    val appPath = System.getProperty("java.home")
+    if (appPath.contains(".app")) {
+        // We're in an app bundle, check for bundled natives
+        val bundledNatives = File(appPath, "../../app/pty4j-native")
+        if (bundledNatives.exists()) {
+            System.setProperty("pty4j.preferred.native.folder", bundledNatives.absolutePath)
         }
+    }
+
+    // Also set java.io.tmpdir to a proper location
+    if (!System.getProperty("java.io.tmpdir").startsWith(System.getProperty("user.home"))) {
+        System.setProperty("java.io.tmpdir", tempDir.absolutePath)
+    }
+}
+
+private fun extractPty4jNatives(targetDir: File) {
+    try {
+        val osName = System.getProperty("os.name").lowercase()
+        val osArch = System.getProperty("os.arch").lowercase()
+
+        // Determine platform and library name
+        val (platformPath, libName) =
+            when {
+                osName.contains("mac") || osName.contains("darwin") -> {
+                    "darwin" to "libpty.dylib"
+                }
+
+                osName.contains("linux") -> {
+                    val arch =
+                        when {
+                            osArch == "aarch64" || osArch == "arm64" -> "aarch64"
+                            osArch == "amd64" || osArch == "x86_64" -> "x86-64"
+                            osArch.startsWith("arm") -> "arm"
+                            osArch == "ppc64le" -> "ppc64le"
+                            osArch == "mips64el" -> "mips64el"
+                            osArch == "riscv64" -> "riscv64"
+                            osArch.contains("86") -> "x86"
+                            else -> osArch
+                        }
+                    "linux/$arch" to "libpty.so"
+                }
+
+                osName.contains("freebsd") -> {
+                    val arch = if (osArch == "amd64" || osArch == "x86_64") "x86-64" else "x86"
+                    "freebsd/$arch" to "libpty.so"
+                }
+
+                else -> {
+                    logger.warn(
+                        LogCategory.SYSTEM,
+                        "Unsupported platform for PTY4J",
+                        mapOf(
+                            "os" to osName,
+                            "arch" to osArch,
+                        ),
+                    )
+                    return
+                }
+            }
+
+        // Create platform-specific directory
+        val platformDir = File(targetDir, platformPath)
+        if (!platformDir.exists()) {
+            platformDir.mkdirs()
+        }
+
+        // Check if native library already exists
+        val libptyFile = File(platformDir, libName)
+        if (libptyFile.exists() && libptyFile.length() > 0) {
+            logger.trace(LogCategory.SYSTEM, "PTY4J natives already extracted", mapOf("platform" to platformPath))
+            return
+        }
+
+        // Find PTY4J jar in classpath
+        val classLoader = Thread.currentThread().contextClassLoader
+
+        // Search for native resources - PTY4J stores them under resources/com/pty4j/native/
+        val nativeResources =
+            listOf(
+                "com/pty4j/native/$platformPath/$libName",
+                "resources/com/pty4j/native/$platformPath/$libName",
+                "$platformPath/$libName",
+                "native/$platformPath/$libName",
+            )
+
+        var extracted = false
+        for (resource in nativeResources) {
+            try {
+                val resourceStream = classLoader.getResourceAsStream(resource)
+                if (resourceStream != null) {
+                    resourceStream.use { input ->
+                        libptyFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    libptyFile.setExecutable(true)
+                    logger.debug(
+                        LogCategory.SYSTEM,
+                        "Extracted PTY4J native",
+                        mapOf(
+                            "resource" to resource,
+                            "target" to libptyFile.absolutePath,
+                        ),
+                    )
+                    extracted = true
+                    break
+                }
+            } catch (e: Exception) {
+                // Try next resource
+                logger.debug(
+                    LogCategory.SYSTEM,
+                    "PTY4J native extraction failed for resource - trying next",
+                    mapOf("resource" to resource, "error" to e.toString()),
+                )
+            }
+        }
+
+        if (!extracted) {
+            // Expected in normal operation: BossTerm/pty4j is intentionally NOT a host
+            // dependency (see composeApp/build.gradle.kts). The terminal-tab plugin bundles
+            // pty4j inside its own JAR and extracts its natives from its own classloader, so
+            // the host classpath has no pty4j resources to extract. The pty4j.tmpdir /
+            // pty4j.preferred.native.folder system properties set above are still honored by
+            // the plugin. Logged at debug to avoid a misleading "terminal is broken" warning.
+            logger.debug(
+                LogCategory.SYSTEM,
+                "PTY4J natives not on host classpath (handled by terminal-tab plugin)",
+                mapOf(
+                    "platform" to platformPath,
+                    "searchedResources" to nativeResources.joinToString(),
+                ),
+            )
+        }
+    } catch (e: Exception) {
+        logger.error(LogCategory.SYSTEM, "Error extracting PTY4J natives", error = e)
     }
 }

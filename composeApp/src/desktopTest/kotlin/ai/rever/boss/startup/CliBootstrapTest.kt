@@ -30,4 +30,25 @@ class CliBootstrapTest {
         val result = CliBootstrap.handleProtocolUnregistration(arrayOf("status"))
         assertEquals(CliDispatchResult.Continue, result)
     }
+    @Test
+    fun failedForwardDoesNotSkipRemainingLinks() {
+        val attempted = mutableListOf<String>()
+        val links = arrayOf("https://one.example", "https://two.example", "https://three.example")
+        val result = CliBootstrap.forwardToExistingInstance(links, maxRetries = 1) { link, origin ->
+            assertEquals(ai.rever.boss.utils.DeepLinkOrigin.EXTERNAL, origin)
+            attempted.add(link)
+            attempted.size != 1
+        }
+        assertFalse(result)
+        assertEquals(3, attempted.size)
+        assertTrue(attempted[0].contains("one.example"))
+        assertTrue(attempted[2].contains("three.example"))
+    }
+
+    @Test
+    fun headlessFlagsDoNotConsumeGuiArguments() {
+        assertFalse(CliBootstrap.isHeadlessCli(arrayOf("--help", "extra")))
+        assertTrue(CliBootstrap.isHeadlessCli(arrayOf("-v", "status")))
+    }
+
 }

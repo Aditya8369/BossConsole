@@ -31,6 +31,7 @@ object OverlaySetup {
         // native surface that paints above lightweight Compose, so an ordinary Compose Popup renders
         // BEHIND the page. Dormant - a no-op - wherever OFF_SCREEN is the mode (macOS, Linux), so the
         // unchanged platforms cannot regress.
+        // Install diagnostics before guarded renderers so registration conflicts are visible.
         BossOverlayHost.diagnostics = { message ->
             logger.warn(LogCategory.UI, message)
         }

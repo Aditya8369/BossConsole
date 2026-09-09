@@ -33,7 +33,10 @@ object ChromiumBootstrap {
             logger.warn(LogCategory.SYSTEM, "Proactive browser lock cleanup failed", error = e)
         }
 
-        // Decide whether the installed engine is usable BEFORE anything boots it.
+        // Check before prewarming or PasskeyPlatformInit: a stale native engine otherwise raises
+        // UnsatisfiedLinkError before the download repair UI can run after a JxBrowser upgrade.
+        // Cache health alone is insufficient (#121): the resolver prefers a bundled engine and
+        // must validate the directory it will actually boot.
         // promotePendingInstall must stay ahead of engine creation: it renames the engine directory.
         ChromiumAutoDownloader.promotePendingInstall()
 

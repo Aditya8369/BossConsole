@@ -95,6 +95,9 @@ object CliBootstrap {
     fun forwardToExistingInstance(
         args: Array<String>,
         maxRetries: Int = 3,
+        send: (String, DeepLinkOrigin) -> Boolean = { link, origin ->
+            SingleInstanceManager.sendToExistingInstance(link, origin)
+        },
     ): Boolean {
         val deepLinks = OsOpenArguments.deepLinksFrom(args)
         if (deepLinks.isEmpty()) {
@@ -110,7 +113,7 @@ object CliBootstrap {
 
         fun forward(link: String): Boolean {
             for (attempt in 1..maxRetries) {
-                if (SingleInstanceManager.sendToExistingInstance(link, DeepLinkOrigin.EXTERNAL)) {
+                if (send(link, DeepLinkOrigin.EXTERNAL)) {
                     logger.info(LogCategory.SYSTEM, "URL sent successfully", mapOf("attempt" to attempt))
                     return true
                 }
@@ -131,6 +134,7 @@ object CliBootstrap {
             return false
         }
 
+        // Do not use all(): a failed send must not skip the rest of a multi-file selection.
         val success = deepLinks.fold(true) { acc, link -> forward(link) && acc }
         if (!success) {
             logger.error(
@@ -150,6 +154,7 @@ object CliBootstrap {
         if (args.isNotEmpty()) {
             try {
                 val osOpenRequests = OsOpenArguments.deepLinksFrom(args)
+                // OS links/files are processed once below, never through both dispatch paths.
                 if (osOpenRequests.isEmpty()) {
                     logger.debug(
                         LogCategory.SYSTEM,
