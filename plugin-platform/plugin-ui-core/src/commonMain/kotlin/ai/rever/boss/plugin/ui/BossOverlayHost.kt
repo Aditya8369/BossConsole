@@ -141,6 +141,10 @@ object BossOverlayHost {
     @Volatile
     private var reportedMissingPopupRenderer = false
 
+    /** Reported at most once per process, for the same reason as the two renderer ones. */
+    @Volatile
+    private var reportedUnmeasuredAnchor = false
+
     /**
      * The [reportMissingModalRenderer] counterpart for popups.
      *
@@ -173,6 +177,38 @@ object BossOverlayHost {
             "Heavyweight overlays are enabled but no modal renderer is registered - dialogs will " +
                 "render behind the browser surface. The BossOverlayHost being read is probably not " +
                 "the host's copy.",
+        )
+    }
+
+    /**
+     * Report that an anchored popup never measured, at most once per process.
+     *
+     * A [BossPopup] with `BossPopupAnchoring.AnchorBounds` waits for `onGloballyPositioned` before it
+     * renders anything, so that its overlay window can be placed under the anchoring control. If that
+     * callback never fires - an ancestor that measures but never places its subtree, or a subtree
+     * composed off-screen - the popup renders nothing, forever, with nothing in the log to say why.
+     * A `LaunchedEffect` in `BossPopup` calls this after a short grace period on that path, turning
+     * "my dropdown doesn't open" into one diagnosable line. See [reportMissingPopupRenderer], whose
+     * once-per-process shape this follows for the same reason.
+     *
+     * This is a generic once-per-process signal, not a per-call-site diagnosis: a slow first
+     * anchor can consume the warning before a later broken popup appears.
+     *
+     * Host-only addition. The API-repo copy must not call this member without a minimum-host
+     * version gate: older hosts resolve their own copy first and do not provide this descriptor.
+     * The API copy deliberately omits both this member and its call for now.
+     *
+     * A separate function rather than a parameter on an existing one: this surface is pinned by the
+     * binary-compatibility validator in two repos, so adding a descriptor is free while changing one
+     * costs a coordinated host and api release.
+     */
+    fun reportUnmeasuredAnchor() {
+        if (reportedUnmeasuredAnchor) return
+        reportedUnmeasuredAnchor = true
+        diagnostics?.invoke(
+            "A heavyweight popup anchored to its calling layout never received a position - its " +
+                "anchor was composed but never placed, so the popup cannot open. Anchor it to the " +
+                "cursor, or ensure the anchoring layout is actually placed on screen.",
         )
     }
 }
