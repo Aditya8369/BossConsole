@@ -3,6 +3,7 @@ package ai.rever.boss.plugin.browser
 import ai.rever.boss.cache.FaviconCache
 import ai.rever.boss.components.overlays.OverlayCorner
 import ai.rever.boss.components.overlays.overlayCornerIsHeavyweight
+import ai.rever.boss.components.plugin.TabAudioSource
 import ai.rever.boss.components.window_panel.components.main_window_panels.LocalInMainWindowPanel
 import ai.rever.boss.config.AutoPipSettingsManager
 import ai.rever.boss.config.JxBrowserConfig
@@ -61,6 +62,8 @@ import com.teamdev.jxbrowser.frame.EditorCommand
 import com.teamdev.jxbrowser.frame.Frame
 import com.teamdev.jxbrowser.js.JsObject
 import com.teamdev.jxbrowser.media.MediaType
+import com.teamdev.jxbrowser.media.event.AudioStartedPlaying
+import com.teamdev.jxbrowser.media.event.AudioStoppedPlaying
 import com.teamdev.jxbrowser.menu.ContextMenuContentType
 import com.teamdev.jxbrowser.navigation.LoadUrlParams
 import com.teamdev.jxbrowser.navigation.event.LoadFinished
@@ -355,6 +358,7 @@ internal class BrowserHandleImpl(
     private val faviconListeners = CopyOnWriteArrayList<(String?) -> Unit>()
     private val loadingListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
     private val zoomListeners = CopyOnWriteArrayList<(Double) -> Unit>()
+    private val audioSource = TabAudioSource { SwingUtilities.invokeLater(it) }
 
     // Track loading state
     private var _isLoading = false
@@ -1390,6 +1394,27 @@ internal class BrowserHandleImpl(
                 }
             }
 
+        // Audio playback state (issue #308). Chromium reports start/stop directly, so the
+        // tab bar's speaker glyph appears and disappears the moment playback changes -
+        // on background tabs and inactive panels too, with no polling. Guarded as a
+        // whole: audio() is engine-backed and this runs during browser setup, where a
+        // shape mismatch must degrade to "no indicator", not to a dead browser.
+        runCatching {
+            val audio = browser.audio()
+            subscriptions +=
+                audio.on(AudioStartedPlaying::class.java) { _ ->
+                    audioSource.update(true)
+                }
+            subscriptions +=
+                audio.on(AudioStoppedPlaying::class.java) { _ ->
+                    audioSource.update(false)
+                }
+            audioSource.seed { audio.isPlaying() }
+        }.onFailure {
+            audioSource.close()
+            logger.warn(LogCategory.BROWSER, "Audio playback subscription unavailable", error = it)
+        }
+
         // Renderer gone. Forgetting the pid here keeps the strip honest: Chromium recycles pids,
         // so a retained one can later belong to a different helper of ours and that process's
         // memory would be reported as this tab's.
@@ -1406,12 +1431,14 @@ internal class BrowserHandleImpl(
                     mapOf("handleId" to id, "exitCode" to event.exitCode(), "status" to event.status().name),
                 )
                 rendererPid.onGone()
+                audioSource.update(false)
             }
 
         // Browser closed
         subscriptions +=
             browser.on(BrowserClosed::class.java) {
                 logger.debug(LogCategory.BROWSER, "Browser closed", mapOf("handleId" to id))
+                audioSource.close()
                 disposed.set(true)
                 nativeDisposal.start()
                 rendererPid.onGone()
@@ -3579,6 +3606,8 @@ internal class BrowserHandleImpl(
         // plugin's component type, which host code cannot name.
         ownerTabId = tabId
 
+        audioSource.bind(tabId)
+
         FluckEngine.setupFullscreenHandler(
             browser = browser,
             tabId = tabId,
@@ -4232,6 +4261,7 @@ internal class BrowserHandleImpl(
     }
 
     override fun dispose() {
+        audioSource.close()
         // Synchronously, and before the guard below: invokeLater would let browser.close() run
         // first, and closing the browser under a still-attached Swing view is exactly the
         // ordering that leaves an undecorated always-on-top window on screen with nothing able
