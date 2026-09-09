@@ -24,6 +24,7 @@ import ai.rever.boss.components.plugin.DynamicPluginManager
 import ai.rever.boss.components.plugin.MissingDependencyDialog
 import ai.rever.boss.components.plugin.MissingHandlerPluginDialog
 import ai.rever.boss.components.plugin.MissingHandlerPluginEventBus
+import ai.rever.boss.components.plugin.PanelIds
 import ai.rever.boss.components.plugin.PluginDependencyEventBus
 import ai.rever.boss.components.plugin.PluginLoadGateHost
 import ai.rever.boss.components.plugin.PluginLoadRemedyAccess
@@ -711,6 +712,21 @@ internal fun BossAppDialogs(state: BossAppState) {
             onPageSelect = { url ->
                 state.showGlobalSearchDialog = false
                 coroutineScope.launch { DashboardEventBus.openUrlInNewTab(url, windowId) }
+                state.focusRequester.requestFocus()
+            },
+            onMcpToolSelect = { mcp ->
+                state.showGlobalSearchDialog = false
+                // Same verb as onToolSelect: open Toolbox so kill-switches are reachable without a
+                // coding CLI attached (BossConsole#380). Does not invoke the MCP tool.
+                val message =
+                    if (state.draggablePanelComponent.toolboxSidebarItem() != null) {
+                        state.draggablePanelComponent.revealPlugin(PanelIds.PLUGIN_MANAGER.panelId)
+                        "In Toolbox, select MCP and find ${mcp.name} to manage its kill-switch"
+                    } else {
+                        "Toolbox is unavailable in this window; the MCP tool was not run or changed"
+                    }
+                // Status messages are process-wide; only this window reveals Toolbox.
+                StatusMessageManager.showMessage(message, durationMs = 8_000L)
                 state.focusRequester.requestFocus()
             },
         )
