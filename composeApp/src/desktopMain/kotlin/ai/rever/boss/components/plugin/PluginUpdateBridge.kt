@@ -169,7 +169,7 @@ actual object PluginUpdateBridge {
             // convention; the just-installed JAR is the highest version and is kept.
             runCatching {
                 ai.rever.boss.plugin.PluginJarReconciler
-                    .reconcilePluginDir(pluginDir)
+                    .reconcilePluginDir(pluginDir, pluginIds = setOf(pluginId))
             }.onFailure { e ->
                 logger.warn(LogCategory.SYSTEM, "Post-update plugin dir reconcile failed: ${e.message}")
             }
