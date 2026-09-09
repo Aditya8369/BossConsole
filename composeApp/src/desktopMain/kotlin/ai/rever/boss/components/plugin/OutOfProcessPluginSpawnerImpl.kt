@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package ai.rever.boss.components.plugin
 
 import ai.rever.boss.ipc.BossIpcClient
@@ -34,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
  * The spawner tracks all managed processes and provides connection info
  * (gRPC channel) for [PluginStateBridge] and remote UI components.
  */
+@Suppress("TooManyFunctions")
 class OutOfProcessPluginSpawnerImpl(
     private val processSpawner: ProcessSpawner,
     private val windowId: String = "",
@@ -197,13 +200,21 @@ class OutOfProcessPluginSpawnerImpl(
     /**
      * Tear down everything [spawn] may have created for a plugin whose startup failed.
      */
+    private fun killDescendants(process: Process?) {
+        runCatching {
+            process?.toHandle()?.descendants()?.forEach { desc ->
+                runCatching { desc.destroyForcibly() }
+            }
+        }
+    }
+
     private fun cleanupFailedSpawn(pluginId: String) {
         runCatching { stateBridges.remove(pluginId)?.dispose() }
         runCatching { pluginChannels.remove(pluginId)?.shutdownNow() }
         // Kill first, drop the registry entry second: while the child is alive the registry entry
         // is the only thing that would let a host exit reap it.
         val process = managedProcesses.remove(pluginId)
-        runCatching { process?.process?.toHandle()?.descendants()?.forEach { desc -> runCatching { desc.destroyForcibly() } } }
+        killDescendants(process?.process)
         runCatching { process?.destroyForcibly() }
         process?.let { kernelRegistry()?.unregisterIfSame(processIdOf(pluginId), it) }
     }
@@ -227,7 +238,7 @@ class OutOfProcessPluginSpawnerImpl(
                 // Destroy process
                 if (process != null) {
                     logger.info("Terminating plugin process: id={}, pid={}", pluginId, process.pid)
-                    runCatching { process.process.toHandle().descendants().forEach { desc -> runCatching { desc.destroyForcibly() } } }
+                    killDescendants(process.process)
                     process.destroy()
 
                     // Wait for graceful shutdown, then force kill
@@ -243,7 +254,7 @@ class OutOfProcessPluginSpawnerImpl(
                 Result.success(Unit)
             } catch (e: Exception) {
                 // Force kill if graceful shutdown failed
-                runCatching { process?.process?.toHandle()?.descendants()?.forEach { desc -> runCatching { desc.destroyForcibly() } } }
+                killDescendants(process?.process)
                 process?.destroyForcibly()
                 logger.warn("Force-killed plugin process: id={}", pluginId, e)
                 Result.success(Unit)

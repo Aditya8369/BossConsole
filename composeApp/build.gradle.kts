@@ -863,6 +863,8 @@ kotlin {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 
+    jvmToolchain(17)
+
     jvm("desktop")
 
     // Enable experimental APIs

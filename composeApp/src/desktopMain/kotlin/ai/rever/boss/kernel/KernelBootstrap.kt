@@ -315,6 +315,7 @@ internal fun recoveryFor(action: RepairAction?): Recovery {
  * 4. Monitors all child processes via ProcessMonitor, auto-respawns on failure
  * 5. Provides graceful shutdown cascade
  */
+@Suppress("TooManyFunctions", "ReturnCount")
 class KernelBootstrap(
     private val mode: ProcessMode = ProcessMode.MONOLITH,
 ) {
@@ -651,7 +652,10 @@ class KernelBootstrap(
         val failedSpawns = mutableListOf<String>()
         var spawnedCount = 0
 
-        fun trySpawn(config: ProcessConfig, jarPath: String) {
+        fun trySpawn(
+            config: ProcessConfig,
+            jarPath: String,
+        ) {
             if (java.io.File(jarPath).exists()) {
                 try {
                     spawner.spawn(config)
@@ -806,26 +810,36 @@ class KernelBootstrap(
         )
 
         if (missingJars.isNotEmpty()) {
-            val msg = "Microkernel: Missing JARs for ${missingJars.size} service(s) (${missingJars.joinToString(", ")}). Run './gradlew fatJar' to build."
+            val listStr = missingJars.joinToString(", ")
+            val msg =
+                "Microkernel: Missing JARs for ${missingJars.size} service(s) ($listStr). " +
+                    "Run './gradlew fatJar' to build."
             logger.warn(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(msg, durationMs = 12_000)
+            ai.rever.boss.components.bars.horizontal.StatusMessageManager
+                .showMessage(msg, durationMs = 12_000)
         }
         if (failedSpawns.isNotEmpty()) {
-            val msg = "Microkernel: Failed to spawn ${failedSpawns.size} service(s) (${failedSpawns.joinToString(", ")})."
+            val listStr = failedSpawns.joinToString(", ")
+            val msg = "Microkernel: Failed to spawn ${failedSpawns.size} service(s) ($listStr)."
             logger.error(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(msg, durationMs = 12_000)
+            ai.rever.boss.components.bars.horizontal.StatusMessageManager
+                .showMessage(msg, durationMs = 12_000)
         }
         if (spawnedCount > 0) {
             val msg = "Microkernel mode active: $spawnedCount service(s) spawned."
             logger.info(msg)
-            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(msg, durationMs = 5_000)
+            ai.rever.boss.components.bars.horizontal.StatusMessageManager
+                .showMessage(msg, durationMs = 5_000)
         }
     }
 
     /**
      * Wait for a service process to register with the kernel and enter running state.
      */
-    suspend fun awaitServiceReadiness(processId: String, timeoutMs: Long = 10_000): Boolean {
+    suspend fun awaitServiceReadiness(
+        processId: String,
+        timeoutMs: Long = 10_000,
+    ): Boolean {
         val registry = processRegistry ?: return false
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeoutMs) {

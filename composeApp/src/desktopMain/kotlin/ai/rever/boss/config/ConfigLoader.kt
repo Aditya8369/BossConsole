@@ -34,6 +34,7 @@ object ConfigLoader {
      * Loads properties from the $BOSS_DATA_DIR/env_vars file if it exists.
      * This is where user settings like BOSS_MODE=KERNEL are saved.
      */
+    @Suppress("NestedBlockDepth")
     private fun loadEnvVars() {
         try {
             val bossDataDir =
@@ -161,6 +162,7 @@ object ConfigLoader {
      * The precedence contract as a pure function, separated from the process
      * environment so tests can pin every tier (see ConfigLoaderTest).
      */
+    @Suppress("LongParameterList")
     internal fun resolve(
         key: String,
         defaultValue: String?,
