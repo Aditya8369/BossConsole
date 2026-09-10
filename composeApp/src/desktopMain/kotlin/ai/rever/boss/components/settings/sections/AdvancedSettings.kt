@@ -80,7 +80,11 @@ fun AdvancedSettings() {
             )
 
             modeSaveError?.let { message ->
-                Text(text = message, color = androidx.compose.material.MaterialTheme.colors.error, fontSize = 11.sp)
+                Text(
+                    text = message,
+                    color = ai.rever.boss.plugin.ui.BossTheme.colors.alert,
+                    fontSize = 11.sp,
+                )
             }
 
             if (needsRestart) {
