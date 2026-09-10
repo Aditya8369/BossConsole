@@ -363,10 +363,11 @@ class KeymapHandlerTest {
         var executed = false
 
         val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
-        val handled = handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
-            executed = true
-            true
-        }
+        val handled =
+            handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+                executed = true
+                true
+            }
 
         assertTrue(handled, "KeyDown matching shortcut should be consumed")
         assertFalse(executed, "KeyDown must not execute the action yet")
@@ -394,10 +395,11 @@ class KeymapHandlerTest {
         }
 
         val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
-        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
-            executionCount++
-            true
-        }
+        val handled =
+            handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+                executionCount++
+                true
+            }
 
         assertTrue(handled, "KeyUp should be handled")
         assertEquals(1, executionCount, "Action must be executed exactly once on KeyUp")
@@ -421,10 +423,11 @@ class KeymapHandlerTest {
         // Simulate auto-repeat key-down events
         repeat(5) {
             val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
-            val handled = handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
-                executionCount++
-                true
-            }
+            val handled =
+                handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+                    executionCount++
+                    true
+                }
             assertTrue(handled, "Auto-repeat KeyDown should be consumed")
         }
 
@@ -432,10 +435,11 @@ class KeymapHandlerTest {
 
         // Release primary key
         val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
-        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
-            executionCount++
-            true
-        }
+        val handled =
+            handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+                executionCount++
+                true
+            }
 
         assertTrue(handled, "KeyUp should be handled")
         assertEquals(1, executionCount, "Action must execute exactly once upon release")
@@ -464,10 +468,11 @@ class KeymapHandlerTest {
 
         // Release Meta/Cmd modifier alone
         val modifierKeyUp = createKeyEvent(Key.MetaLeft, KeyEventType.KeyUp, meta = false)
-        val handled = handler.handleKeyEvent(modifierKeyUp, ShortcutContext.GLOBAL) {
-            executed = true
-            true
-        }
+        val handled =
+            handler.handleKeyEvent(modifierKeyUp, ShortcutContext.GLOBAL) {
+                executed = true
+                true
+            }
 
         assertFalse(handled, "Modifier release alone should not be consumed as action")
         assertFalse(executed, "Modifier release must not execute the action")
@@ -475,10 +480,11 @@ class KeymapHandlerTest {
 
         // Subsequent primary key up should do nothing
         val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = false)
-        val keyUpHandled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
-            executed = true
-            true
-        }
+        val keyUpHandled =
+            handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+                executed = true
+                true
+            }
 
         assertTrue(keyUpHandled, "The claimed primary release stays consumed after cancellation")
         assertFalse(executed)
@@ -511,10 +517,11 @@ class KeymapHandlerTest {
 
         // Subsequent key up should not trigger action
         val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
-        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
-            executed = true
-            true
-        }
+        val handled =
+            handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+                executed = true
+                true
+            }
 
         assertFalse(handled)
         assertFalse(executed)
