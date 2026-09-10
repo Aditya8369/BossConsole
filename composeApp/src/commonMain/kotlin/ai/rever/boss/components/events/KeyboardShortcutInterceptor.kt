@@ -5,19 +5,19 @@ import ai.rever.boss.keymap.handler.KeymapHandler
 import ai.rever.boss.keymap.model.ShortcutContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalWindowInfo
 import kotlinx.coroutines.launch
 
 /**
@@ -46,7 +46,9 @@ internal val MODIFIER_ONLY_KEYS =
  * Use this to wrap components that consume all keyboard input (like terminals, browsers)
  * to ensure global/workspace shortcuts still work.
  *
- * Recognizes shortcut chords on KeyDown and emits to KeyboardEventBus on primary KeyUp.
+ * Recognizes shortcut chords on KeyDown and emits a KeyUp event to KeyboardEventBus.
+ * Modifier-first release cancels, matching the AWT dispatcher. Place this modifier before
+ * the wrapped component's focus target so its focus observer can clear pending state.
  *
  * @param windowId The current window ID for event routing
  * @param source The event source identifier (e.g., COMPONENT_TERMINAL, COMPONENT_BROWSER)
@@ -72,7 +74,8 @@ fun Modifier.interceptKeyboardShortcuts(
         onDispose { handler.clearPendingShortcut() }
     }
 
-    return this.onFocusChanged { if (!it.hasFocus) handler.clearPendingShortcut() }
+    return this
+        .onFocusChanged { if (!it.hasFocus) handler.clearPendingShortcut() }
         .onPreviewKeyEvent { keyEvent ->
             handler.handleKeyEvent(keyEvent, context) {
                 coroutineScope.launch {

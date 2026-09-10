@@ -44,7 +44,6 @@
     <ID>TooManyFunctions:EditorAPIAccess.kt$EditorAPIAccess</ID>
     <ID>LongParameterList:DownloadCenter.kt$DownloadCenter$( id: String, title: String, kind: TransferKind, detail: String? = null, onCancel: (() -&gt; Unit)? = null, owner: String? = null, )</ID>
     <ID>LongParameterList:StoreVersionInstaller.kt$StoreVersionInstaller$( store: PluginRepository, request: StoreVersionRequest, unload: suspend (String) -&gt; Result&lt;Unit&gt;, load: suspend (String) -&gt; Result&lt;Boolean&gt;, onProgress: ((Float) -&gt; Unit)? = null, onInstalling: (() -&gt; Unit)? = null, )</ID>
-    <ID>ComplexCondition:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$handled &amp;&amp; (binding.actionId == KeymapActions.TAB_NEXT || binding.actionId == KeymapActions.TAB_PREVIOUS) &amp;&amp; KeymapSettingsManager.currentSettings.value.tabSwitchMode == TabSwitchMode.MRU</ID>
     <ID>ComplexCondition:BossAppEventBusEffects.kt$processingState.totalTabs == 0 &amp;&amp; !processingState.isProcessingURLs &amp;&amp; !processingState.isProcessingTerminals &amp;&amp; !processingState.isProcessingFiles &amp;&amp; processingState.isRestorationComplete</ID>
     <ID>ComplexCondition:BrowserHandleImpl.kt$BrowserHandleImpl$ch != '\u0000' &amp;&amp; !ch.isISOControl() &amp;&amp; !bool("ctrl") &amp;&amp; !bool("meta")</ID>
     <ID>ComplexCondition:ChromiumAutoDownloader.kt$ChromiumAutoDownloader$isMacOSExecutable || isChromium || isSharedLib || isShellScript || hasNoExtension</ID>
@@ -81,7 +80,6 @@
     <ID>ConstructorParameterNaming:UpdateService.kt$GitHubRelease$val tag_name: String</ID>
     <ID>ConstructorParameterNaming:UserService.kt$UserBasicInfo$val created_at: String? = null</ID>
     <ID>ConstructorParameterNaming:UserService.kt$UserBasicInfo$val updated_at: String? = null</ID>
-    <ID>CyclomaticComplexMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$fun install()</ID>
     <ID>CyclomaticComplexMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$private fun chordMatchesEvent( modifiers: Collection&lt;String&gt;, event: KeyEvent, ): Boolean</ID>
     <ID>CyclomaticComplexMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$internal fun dispatchAction( actionId: String, windowId: String, perform: Boolean = true, ): Boolean</ID>
     <ID>CyclomaticComplexMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$internal fun getKeyName(keyCode: Int): String</ID>
@@ -234,7 +232,6 @@
     <ID>LargeClass:PluginStoreSetup.kt$PluginStoreSetup</ID>
     <ID>LargeClass:SplitView.kt$SplitViewState</ID>
     <ID>LargeClass:UpdateScriptGenerator.kt$UpdateScriptGenerator</ID>
-    <ID>LongMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$fun install()</ID>
     <ID>LongMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$internal fun dispatchAction( actionId: String, windowId: String, perform: Boolean = true, ): Boolean</ID>
     <ID>LongMethod:AWTKeyboardInterceptor.kt$AWTKeyboardInterceptor$internal fun getKeyName(keyCode: Int): String</ID>
     <ID>LongMethod:ActionCard.kt$@Composable fun ActionCard( icon: ImageVector, title: String, shortcut: String? = null, onClick: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>

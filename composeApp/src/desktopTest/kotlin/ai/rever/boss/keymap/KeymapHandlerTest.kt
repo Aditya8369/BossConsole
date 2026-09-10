@@ -533,13 +533,31 @@ class KeymapHandlerTest {
         val handler = KeymapHandler(KeymapSettings.fromBindings(listOf(binding)))
         handler.updateSettings(KeymapSettings.fromBindings(listOf(binding.copy(key = "T"))))
         var calls = 0
-        val execute: (String) -> Boolean = { calls++; true }
-        assertFalse(handler.handleKeyEvent(createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true),
-            ShortcutContext.GLOBAL, execute))
-        assertTrue(handler.handleKeyEvent(createKeyEvent(Key.T, KeyEventType.KeyDown, meta = true),
-            ShortcutContext.GLOBAL, execute))
-        assertTrue(handler.handleKeyEvent(createKeyEvent(Key.T, KeyEventType.KeyUp, meta = true),
-            ShortcutContext.TERMINAL, execute))
+        val execute: (String) -> Boolean = {
+            calls++
+            true
+        }
+        assertFalse(
+            handler.handleKeyEvent(
+                createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true),
+                ShortcutContext.GLOBAL,
+                execute,
+            ),
+        )
+        assertTrue(
+            handler.handleKeyEvent(
+                createKeyEvent(Key.T, KeyEventType.KeyDown, meta = true),
+                ShortcutContext.GLOBAL,
+                execute,
+            ),
+        )
+        assertTrue(
+            handler.handleKeyEvent(
+                createKeyEvent(Key.T, KeyEventType.KeyUp, meta = true),
+                ShortcutContext.TERMINAL,
+                execute,
+            ),
+        )
         assertEquals(0, calls)
     }
 
@@ -548,15 +566,28 @@ class KeymapHandlerTest {
         val bindings = listOf("N", "T").map { KeyBinding(actionId = it, key = it, modifiers = listOf("Cmd")) }
         val handler = KeymapHandler(KeymapSettings.fromBindings(bindings))
         val calls = mutableListOf<String>()
-        val execute: (String) -> Boolean = { calls.add(it); true }
+        val execute: (String) -> Boolean = {
+            calls.add(it)
+            true
+        }
         for (key in listOf(Key.N, Key.T, Key.N)) {
-            assertTrue(handler.handleKeyEvent(createKeyEvent(key, KeyEventType.KeyDown, meta = true),
-                ShortcutContext.GLOBAL, execute))
+            assertTrue(
+                handler.handleKeyEvent(
+                    createKeyEvent(key, KeyEventType.KeyDown, meta = true),
+                    ShortcutContext.GLOBAL,
+                    execute,
+                ),
+            )
         }
         assertTrue(calls.isEmpty())
         for (key in listOf(Key.N, Key.T)) {
-            assertTrue(handler.handleKeyEvent(createKeyEvent(key, KeyEventType.KeyUp, meta = true),
-                ShortcutContext.GLOBAL, execute))
+            assertTrue(
+                handler.handleKeyEvent(
+                    createKeyEvent(key, KeyEventType.KeyUp, meta = true),
+                    ShortcutContext.GLOBAL,
+                    execute,
+                ),
+            )
         }
         assertEquals(listOf("N", "T"), calls)
     }

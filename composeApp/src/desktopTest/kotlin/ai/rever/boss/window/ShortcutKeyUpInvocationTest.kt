@@ -272,5 +272,4 @@ class ShortcutKeyUpInvocationTest {
         )
         assertFalse(AWTKeyboardInterceptor.handleKeyReleased(release), "nothing left to fire on a second release")
     }
-
 }

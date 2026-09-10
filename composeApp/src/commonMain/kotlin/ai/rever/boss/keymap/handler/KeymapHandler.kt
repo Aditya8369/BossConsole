@@ -10,9 +10,9 @@ import ai.rever.boss.utils.logging.LogCategory
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
@@ -102,8 +102,9 @@ class KeymapHandler(
     ): Boolean {
         pendingShortcuts.entries.removeAll { it.value.context != context }
         val pending = pendingShortcuts[event.key]
-        val barePress = event.type == KeyEventType.KeyDown &&
-            !event.isMetaPressed && !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+        val hasModifier =
+            listOf(event.isMetaPressed, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed).any { it }
+        val barePress = event.type == KeyEventType.KeyDown && !hasModifier
         if (barePress && pending != null && pending.binding.modifiers.isNotEmpty()) {
             pendingShortcuts.remove(event.key)
             claimedKeys.remove(event.key)
@@ -115,24 +116,41 @@ class KeymapHandler(
         }
     }
 
-    private fun armShortcut(event: KeyEvent, context: ShortcutContext): Boolean = when {
-        event.key in MODIFIER_ONLY_KEYS -> false
-        event.key in claimedKeys -> true
-        else -> {
-            val binding = matcher.match(event, context)
-            if (binding != null) pendingShortcuts[event.key] = PendingKeymapShortcut(binding, event.key, context)
-            if (binding != null) claimedKeys.add(event.key)
-            binding != null
-        }
-    }
+    private fun armShortcut(
+        event: KeyEvent,
+        context: ShortcutContext,
+    ): Boolean =
+        when {
+            event.key in MODIFIER_ONLY_KEYS -> {
+                false
+            }
 
-    private fun releaseShortcut(event: KeyEvent, executor: (String) -> Boolean): Boolean {
+            event.key in claimedKeys -> {
+                true
+            }
+
+            else -> {
+                val binding = matcher.match(event, context)
+                if (binding != null) pendingShortcuts[event.key] = PendingKeymapShortcut(binding, event.key, context)
+                if (binding != null) claimedKeys.add(event.key)
+                binding != null
+            }
+        }
+
+    private fun releaseShortcut(
+        event: KeyEvent,
+        executor: (String) -> Boolean,
+    ): Boolean {
         val claimed = claimedKeys.remove(event.key)
         if (event.key in MODIFIER_ONLY_KEYS) pendingShortcuts.clear()
         val pending = pendingShortcuts.remove(event.key)
         if (pending != null) {
             val handled = executor(pending.binding.actionId)
-            logger.debug(LogCategory.UI, "Released shortcut", mapOf("actionId" to pending.binding.actionId, "handled" to handled))
+            logger.debug(
+                LogCategory.UI,
+                "Released shortcut",
+                mapOf("actionId" to pending.binding.actionId, "handled" to handled),
+            )
         }
         return claimed
     }

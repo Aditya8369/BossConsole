@@ -59,7 +59,7 @@ object AWTKeyboardInterceptor {
     // modifier is a benign mismatch — the stray release just no-ops downstream.
     private var tabCycleModifierKeyCode = -1
     private var tabCycleWindowId: String? = null
-    private val claimedKeys = mutableSetOf<Int>()
+    private val claimedKeys = ConcurrentHashMap.newKeySet<Int>()
 
     // Minimum time shift must be released to count as a clean release (prevents false positives from held shift)
     private const val MIN_SHIFT_RELEASE_MS = 50
@@ -95,7 +95,7 @@ object AWTKeyboardInterceptor {
 
     // One pending action per physical primary key supports overlapping chords. Normal
     // dispatch and focus changes run on the EDT; shutdown also clears this state.
-    internal val pendingShortcuts = HashMap<Int, PendingShortcut>()
+    internal val pendingShortcuts = ConcurrentHashMap<Int, PendingShortcut>()
 
     private var focusListener: java.beans.PropertyChangeListener? = null
 
@@ -178,7 +178,6 @@ object AWTKeyboardInterceptor {
                 finishTabCycle()
             }
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addPropertyChangeListener("focusedWindow", focusListener)
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().addPropertyChangeListener("focusOwner", focusListener)
         isInstalled = true
     }
 
@@ -187,7 +186,9 @@ object AWTKeyboardInterceptor {
         event: KeyEvent,
         windowId: String? = findWindowId(KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow),
     ): Boolean {
-        // Modifier cancellation must precede both the Shift gesture and MRU commit paths.
+        // Keep #492's cancellation policy: releasing any modifier before the primary key
+        // cancels the chord. No bound action fires from a modifier release (#490).
+        // Cancellation must precede both the Shift gesture and MRU commit paths.
         if (event.id == KeyEvent.KEY_RELEASED && isModifierOnlyKey(event.keyCode)) {
             pendingShortcuts.clear()
             if (event.keyCode == tabCycleModifierKeyCode) finishTabCycle()
@@ -198,16 +199,20 @@ object AWTKeyboardInterceptor {
             lastShiftPressTime = 0
             lastShiftReleaseTime = 0
         }
-        val handled = when (event.id) {
-            KeyEvent.KEY_RELEASED -> handleKeyReleased(event)
-            KeyEvent.KEY_PRESSED -> windowId != null && handleKeyPressed(event, windowId)
-            else -> false
-        }
+        val handled =
+            when (event.id) {
+                KeyEvent.KEY_RELEASED -> handleKeyReleased(event)
+                KeyEvent.KEY_PRESSED -> windowId != null && handleKeyPressed(event, windowId)
+                else -> false
+            }
         if (handled) event.consume()
         return handled
     }
 
-    private fun handleShiftEvent(event: KeyEvent, windowId: String?): Boolean {
+    private fun handleShiftEvent(
+        event: KeyEvent,
+        windowId: String?,
+    ): Boolean {
         val now = System.currentTimeMillis()
         var handled = false
         when (event.id) {
@@ -227,6 +232,7 @@ object AWTKeyboardInterceptor {
                     lastShiftPressTime = now
                 }
             }
+
             KeyEvent.KEY_RELEASED -> {
                 if (shiftPressCount == 1 && now - lastShiftPressTime < DOUBLE_SHIFT_THRESHOLD_MS) {
                     lastShiftReleaseTime = now
@@ -256,7 +262,6 @@ object AWTKeyboardInterceptor {
         dispatcher = null
         focusListener?.let { l ->
             KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener("focusedWindow", l)
-            KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener("focusOwner", l)
         }
         focusListener = null
         isInstalled = false
@@ -340,11 +345,16 @@ object AWTKeyboardInterceptor {
             }
 
             claimedKeys.add(event.keyCode)
-            pendingShortcuts[event.keyCode] = PendingShortcut(
-                keyCode = event.keyCode, windowId = windowId, hostBinding = match,
-                metaDown = event.isMetaDown, controlDown = event.isControlDown,
-                shiftDown = event.isShiftDown, altDown = event.isAltDown,
-            )
+            pendingShortcuts[event.keyCode] =
+                PendingShortcut(
+                    keyCode = event.keyCode,
+                    windowId = windowId,
+                    hostBinding = match,
+                    metaDown = event.isMetaDown,
+                    controlDown = event.isControlDown,
+                    shiftDown = event.isShiftDown,
+                    altDown = event.isAltDown,
+                )
             return true
         }
 
@@ -362,9 +372,13 @@ object AWTKeyboardInterceptor {
             // confirmed for real at key-up in handleKeyReleased.
             pendingShortcuts[event.keyCode] =
                 PendingShortcut(
-                    keyCode = event.keyCode, windowId = windowId, pluginActionId = pluginActionId,
-                    metaDown = event.isMetaDown, controlDown = event.isControlDown,
-                    shiftDown = event.isShiftDown, altDown = event.isAltDown,
+                    keyCode = event.keyCode,
+                    windowId = windowId,
+                    pluginActionId = pluginActionId,
+                    metaDown = event.isMetaDown,
+                    controlDown = event.isControlDown,
+                    shiftDown = event.isShiftDown,
+                    altDown = event.isAltDown,
                 )
             return true
         }
@@ -394,7 +408,9 @@ object AWTKeyboardInterceptor {
             val match = checkNotNull(pending.hostBinding)
             val handled = dispatchAction(match.binding.actionId, pending.windowId, perform = true)
             val cyclesTabs = match.binding.actionId in setOf(KeymapActions.TAB_NEXT, KeymapActions.TAB_PREVIOUS)
-            if (handled && cyclesTabs && KeymapSettingsManager.currentSettings.value.tabSwitchMode == TabSwitchMode.MRU) {
+            if (
+                handled && cyclesTabs && KeymapSettingsManager.currentSettings.value.tabSwitchMode == TabSwitchMode.MRU
+            ) {
                 tabCycleWindowId = pending.windowId
                 tabCycleModifierKeyCode = cyclingModifierKeyCode(match.keystroke)
             }
