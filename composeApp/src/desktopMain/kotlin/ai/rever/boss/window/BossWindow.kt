@@ -514,25 +514,27 @@ fun ApplicationScope.BossWindow(
                 // Process Mode toggle
                 val modeRevision by ai.rever.boss.config.savedBossModeChanges
                     .collectAsState()
-                val modeAvailable =
-                    remember {
-                        ai.rever.boss.config
-                            .kernelModeAvailable()
-                    }
+                var modeAvailable by remember { mutableStateOf(false) }
+                var modeLoaded by remember { mutableStateOf(false) }
                 val runningKernelMode =
                     remember {
                         ai.rever.boss.config.ConfigLoader
                             .getConfig("BOSS_MODE") == "KERNEL"
                     }
-                var isKernelMode by remember { mutableStateOf(runningKernelMode) }
+                var isKernelMode by remember { mutableStateOf(false) }
                 var modeSaveFailed by remember { mutableStateOf(false) }
                 LaunchedEffect(modeRevision) {
-                    modeSaveFailed = false
+                    modeAvailable =
+                        withContext(Dispatchers.IO) {
+                            ai.rever.boss.config
+                                .kernelModeAvailable()
+                        }
                     isKernelMode =
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             ai.rever.boss.config.ConfigLoader
                                 .bossModeForNextLaunch() == "KERNEL"
                         }
+                    modeLoaded = true
                 }
                 val modeOverride =
                     remember {
@@ -541,13 +543,14 @@ fun ApplicationScope.BossWindow(
                     }
                 CheckboxItem(
                     when {
+                        !modeLoaded -> "Microkernel Mode (loading)"
                         !modeAvailable -> "Microkernel Mode (unavailable)"
                         modeOverride != null -> "Microkernel Mode (externally controlled)"
                         modeSaveFailed -> "Microkernel Mode (save failed)"
                         isKernelMode != runningKernelMode -> "Microkernel Mode (restart required)"
                         else -> "Microkernel Mode"
                     },
-                    enabled = modeOverride == null && modeAvailable,
+                    enabled = modeLoaded && modeOverride == null && modeAvailable,
                     checked = isKernelMode,
                     onCheckedChange = { enabled ->
                         modeSaveFailed = false
