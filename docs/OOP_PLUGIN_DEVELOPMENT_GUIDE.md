@@ -12,10 +12,10 @@ BOSS Console supports two execution models for plugins:
 
 | Feature | In-Process Plugins | Out-of-Process (OOP) Plugins |
 |---|---|---|
-| **Runtime Boundary** | Host JVM (Classloader isolation) | Dedicated Child JVM process |
-| **Crash Resilience** | Crash / OOM can destabilize host | Process isolation: Child failure does not crash the host |
+| **Runtime Boundary** | Host JVM (classloader isolation) | Host registration/UI plus child JVM state |
+| **Crash Resilience** | Crash / OOM can destabilize host | Child failures are contained; host-side plugin code can still fail |
 | **UI Rendering** | Direct Compose Multiplatform composables | Host Compose UI with child state (split-brain), or explicitly registered remote widget surfaces |
-| **Classpath Separation** | Potential dependency conflicts with host | Fully isolated dependency tree and JVM arguments |
+| **Classpath Separation** | Potential dependency conflicts with host | Separate child classpath/JVM arguments, plus host-loaded plugin classes |
 | **Security / Sandbox** | Shares host memory address space | Separate address space; same OS user, with service-specific IPC checks |
 
 The current `DynamicPluginManager` loads and registers the plugin in the host even on its OOP branch, then starts the child for state management. Declaring OOP therefore does not mean no plugin code executes in the host. Remote widget surfaces are a separate explicit registration path. When no spawner is available, the manager falls back to in-process loading; this is not controlled by the sample manifest's `fallback` key.
@@ -86,7 +86,7 @@ sequenceDiagram
     participant Host as Host (OutOfProcessPluginSpawner)
     participant Kernel as Kernel Registry
     participant Child as Plugin Child Process
-    
+
     Host->>Child: Spawn JVM process (PluginProcessMainKt)
     Child->>Kernel: Connect & Register (RegisterProcessRequest)
     Host->>Kernel: Wait for child readiness (startupTimeoutMs)
@@ -103,7 +103,7 @@ sequenceDiagram
 ### Lifecycle Stages
 1. **Spawn**: `OutOfProcessPluginSpawnerImpl.spawn()` builds the classpath (`runtimeClasspath` + `pluginJar` + `apiJar`), prepares the `ProcessConfig`, and executes the child process via `ProcessSpawner`.
 2. **Registration Handshake**: The child connects back to the kernel via `BOSS_KERNEL_IPC_ADDR` and registers its process ID and IPC listening address.
-3. **Readiness Gate**: Host awaits child registration up to `startupTimeoutMs` (default: 30s). If timeout expires, `cleanupFailedSpawn` forcibly kills the orphaned child. Registration occurs before runtime state-holder initialization, so it is not proof that state sync or UI is usable. Current dev scopes process IDs by window and uses the process ID as the state instance ID; plugin identity remains separate.
+3. **Readiness Gate**: Host awaits child registration up to `startupTimeoutMs` (default: 30s). If timeout expires, `cleanupFailedSpawn` forcibly kills the orphaned child. Registration occurs before runtime state-holder initialization, so it is not proof that state sync or UI is usable. The manager launches spawning in the background and logs a failure while the plugin can remain `LOADED`. Current dev scopes process IDs by window and uses the process ID as the state instance ID; plugin identity remains separate.
 4. **Heartbeat & Monitoring**: The host config defaults `heartbeatIntervalMs` to 5s. Plugin children are excluded from the global health supervisor, so `RestartPolicy.ON_FAILURE` and `maxRestartAttempts` do not imply automatic plugin restart. See `KernelBootstrap` and the plugin-specific monitoring/recovery path. The standalone runtime currently advertises its own fixed 5s heartbeat and 30s startup contract.
 5. **Teardown**: Host shuts down gRPC channels gracefully (with 3-second fallback to `shutdownNow`), disposes state bridges, and terminates the child process.
 
@@ -262,10 +262,10 @@ Use `WidgetDiffEngine` directly in unit tests to assert UI tree generation witho
 fun testWidgetTreeGeneration() {
     val stateHolder = SampleStateHolder()
     val initialTree = stateHolder.renderUI()
-    
+
     stateHolder.increment()
     val updatedTree = stateHolder.renderUI()
-    
+
     val patches = WidgetDiffEngine.diff(initialTree, updatedTree)
     assertTrue(patches.isNotEmpty())
 }
