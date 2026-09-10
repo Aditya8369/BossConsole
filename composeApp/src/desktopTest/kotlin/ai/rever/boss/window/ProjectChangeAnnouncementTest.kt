@@ -66,7 +66,7 @@ class ProjectChangeAnnouncementTest {
     /** A state wired the way [WindowProjectStateRegistry] wires one, minus the recent-projects half. */
     private fun announcingState(windowId: String): WindowProjectState =
         WindowProjectState(windowId).also { state ->
-            state.setProjectSelectionCallback(ProjectChangeAnnouncer(windowId, state.selectedProject.value.path))
+            state.setProjectSelectionCallback(ProjectChangeAnnouncer(windowId))
         }
 
     private fun project(path: String) = Project(name = path.substringAfterLast('/'), path = path, lastOpened = 0L)
@@ -114,24 +114,6 @@ class ProjectChangeAnnouncementTest {
         state.selectProject(project("/tmp/boss-pca-same"))
 
         assertEquals(1, changes().size)
-    }
-
-    /**
-     * The seed. Announcing the selection that was already in place - `""` in every production
-     * path - would tell every plugin the project just became "no project", moments before the
-     * real restore lands: precisely the clear-yourself signal this exists to avoid.
-     */
-    @Test
-    fun `a project already selected when the announcer is installed is not announced`() {
-        val state = WindowProjectState("w-seeded")
-        state.selectProject(project("/tmp/boss-pca-preexisting"))
-        state.setProjectSelectionCallback(ProjectChangeAnnouncer("w-seeded", state.selectedProject.value.path))
-
-        assertTrue(changes().isEmpty(), "the standing selection is not a change")
-
-        state.selectProject(project("/tmp/boss-pca-next"))
-
-        assertEquals("/tmp/boss-pca-preexisting", changes().single().previousProjectPath)
     }
 
     // ============================================================
@@ -251,7 +233,7 @@ class ProjectChangeAnnouncementTest {
         state.setProjectSelectionCallback(
             WindowProjectStateRegistry.hostProjectCallback(
                 updateRecents = { error("recent-projects persistence is broken") },
-                announcer = ProjectChangeAnnouncer("w-throwing", ""),
+                announcer = ProjectChangeAnnouncer("w-throwing"),
             ),
         )
 
@@ -273,6 +255,26 @@ class ProjectChangeAnnouncementTest {
             changes().last().previousProjectPath,
             "previousPath was left behind by the throw, so every later event is one step stale",
         )
+    }
+
+    /** Both callback failures remain available; the first is primary and the second suppressed. */
+    @Test
+    fun `neither callback failure hides the other`() {
+        val recentsFailure = IllegalStateException("recent-projects persistence is broken")
+        val announcementFailure = IllegalArgumentException("announcement is broken")
+        val callback =
+            WindowProjectStateRegistry.hostProjectCallback(
+                updateRecents = { throw recentsFailure },
+                announcer = ProjectSelectionCallback { throw announcementFailure },
+            )
+
+        val thrown =
+            assertFailsWith<IllegalStateException> {
+                callback.onProjectSelected(project("/tmp/boss-pca-both-throw"))
+            }
+
+        assertSame(recentsFailure, thrown)
+        assertEquals(listOf(announcementFailure), thrown.suppressed.toList())
     }
 
     /** Documented behaviour change: no state means no selection happened, so nothing is announced. */

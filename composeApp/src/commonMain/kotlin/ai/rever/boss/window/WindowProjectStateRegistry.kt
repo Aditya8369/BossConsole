@@ -56,7 +56,7 @@ object WindowProjectStateRegistry {
         state.setProjectSelectionCallback(
             hostProjectCallback(
                 updateRecents = ProjectState::updateRecentProjects,
-                announcer = ProjectChangeAnnouncer(windowId, state.selectedProject.value.path),
+                announcer = ProjectChangeAnnouncer(windowId),
             ),
         )
         return state
@@ -65,8 +65,8 @@ object WindowProjectStateRegistry {
     /**
      * The window's selection callback: record the project as recent, then announce it.
      *
-     * `try`/`finally`, not two statements. [updateRecents] persists to disk, and if it throws,
-     * skipping the announcement would ALSO leave the announcer's `previousPath` stale - every
+     * [updateRecents] persists to disk, and if it throws, skipping the announcement would ALSO
+     * leave the announcer's `previousPath` stale - every
      * later selection in this window would then report a `previousProjectPath` one step behind,
      * silently, for the rest of the session. The announcement being unconditional is the entire
      * point of [ProjectChangeAnnouncer], so it must not be the half an unrelated failure can

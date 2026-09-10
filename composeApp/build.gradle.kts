@@ -2462,7 +2462,7 @@ tasks.withType<Test> {
     // reliable place to set it: by the time any test code runs it is too late.
     val testHome =
         layout.buildDirectory
-            .dir("test-home")
+            .dir("test-home/$name")
             .get()
             .asFile
     systemProperty("user.home", testHome.absolutePath)

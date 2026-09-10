@@ -105,9 +105,10 @@ class ApplicationEventBusImpl private constructor(
                 // Publish to the process-global registry so the host's publishSystemEvent and
                 // in-process plugins share this exact instance regardless of classloader.
                 //
-                // Checked on every call rather than only at creation: the registry is what
-                // publishSystemEvent reads, so an instance that exists while the registry is
-                // empty means host events go nowhere, and nothing would ever put it right.
+                // Checked on every call rather than only at creation: when BOTH registry fields
+                // are empty, an instance that already exists would otherwise leave host events
+                // going nowhere forever. A half-populated registry is deliberately left alone;
+                // publishSystemEvent refuses its bus-without-publisher form and warns once.
                 // Inside the lock, because it is a read-modify-write of two process-global
                 // statics; the lock is uncontended after the first call.
                 //
