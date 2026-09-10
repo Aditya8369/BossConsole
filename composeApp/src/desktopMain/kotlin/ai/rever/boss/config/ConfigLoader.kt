@@ -148,15 +148,18 @@ object ConfigLoader {
         envVarsProps: Properties,
         localProps: Properties,
         embeddedProps: Properties,
-    ): String? =
-        envValue.orNullIfBlank()
-            ?: sysPropValue.orNullIfBlank()
-            ?: envVarsProps.getProperty(key).takeIf { key == "BOSS_MODE" }.orNullIfBlank()
-            ?: localProps.getProperty(key).orNullIfBlank()
-            ?: embeddedProps.getProperty(key).orNullIfBlank()
-            // NOT blank-filtered: a caller that passes "" as its default has said so explicitly,
-            // unlike an exported variable that merely happens to be empty.
-            ?: defaultValue
+    ): String? {
+        val resolved =
+            envValue.orNullIfBlank()
+                ?: sysPropValue.orNullIfBlank()
+                ?: envVarsProps.getProperty(key).takeIf { key == "BOSS_MODE" }.orNullIfBlank()
+                ?: localProps.getProperty(key).orNullIfBlank()
+                ?: embeddedProps.getProperty(key).orNullIfBlank()
+                // NOT blank-filtered: a caller that passes "" as its default has said so explicitly,
+                // unlike an exported variable that merely happens to be empty.
+                ?: defaultValue
+        return if (key == "BOSS_MODE") resolved?.trim()?.uppercase() else resolved
+    }
 
     /**
      * A blank value at any tier is not a value, so the next tier gets its turn.

@@ -37,7 +37,7 @@ class StartupNoticeQueueTest {
                         queue.report("next batch", "auth")
                     }.take(2)
                     .toList()
-            assertEquals(listOf("auth restart cap missing editor", "next batch"), received)
+            assertEquals(listOf("auth restart cap · missing editor", "next batch"), received)
             assertEquals(KERNEL_NOTICE_DURATION_MS, testScheduler.currentTime)
         }
 
@@ -64,4 +64,19 @@ class StartupNoticeQueueTest {
             window.join()
             assertEquals("retain this", queue.notices.first())
         }
+
+    @Test
+    fun `operator remedies precede startup information`() =
+        runTest {
+            val queue = StartupNoticeQueue()
+            queue.report("startup summary", "startup")
+            queue.report("restart BOSS", "auth")
+            assertEquals("restart BOSS · startup summary", queue.notices.first())
+        }
+
+    @Test
+    fun `large failure batches display an actionable count`() {
+        val batch = (1..8).associate { "service-$it" to "repeated lengthy failure" }
+        assertEquals("8 services need attention. Check service logs for details.", renderKernelNotices(batch))
+    }
 }

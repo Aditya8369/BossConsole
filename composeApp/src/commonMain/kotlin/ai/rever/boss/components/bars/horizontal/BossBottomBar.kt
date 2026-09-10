@@ -264,6 +264,8 @@ fun BossRightBottomBar() {
     statusMessage?.let { message ->
         Text(
             text = message,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             color = BossTheme.colors.ok, // Green color for success
             fontSize = 12.sp,
             modifier = Modifier.padding(horizontal = 8.dp),

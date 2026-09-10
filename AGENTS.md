@@ -400,6 +400,9 @@ For `BOSS_MODE` only, the `env_vars` file is consulted between system properties
 local.properties. Reader and settings writers use `BossDirectories.resolve("env_vars")`;
 `BOSS_DATA_DIR` does not redirect this preferences file. This is the process-mode menu's plain, unquoted `KEY=value` format
 (no shell `export` syntax); other keys in that file cannot override host configuration.
+`BOSS_MODE` is normalized to trimmed uppercase by ConfigLoader; runtime plugin gates must
+use that resolver rather than prefixing a raw getenv lookup. Nonblank environment/system
+property overrides own the setting, so the UI shows their source and disables the saved toggle.
 
 ### Credential brokers
 

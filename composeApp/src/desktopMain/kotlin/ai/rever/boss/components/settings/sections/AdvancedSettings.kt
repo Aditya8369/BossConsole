@@ -7,7 +7,6 @@ import ai.rever.boss.components.settings.shared.SettingsTheme.TextPrimary
 import ai.rever.boss.components.settings.shared.SettingsTheme.TextSecondary
 import ai.rever.boss.components.settings.shared.SettingsToggle
 import ai.rever.boss.performance.PerformanceSettingsManager
-import ai.rever.boss.plugin.pathutils.BossDirectories
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Card
@@ -25,7 +24,12 @@ import kotlinx.coroutines.withContext
 fun AdvancedSettings() {
     val coroutineScope = rememberCoroutineScope()
 
-    // Read current BOSS_MODE from env_vars file
+    // Show the same effective mode as startup; externally owned settings cannot be changed here.
+    val modeOverride =
+        remember {
+            ai.rever.boss.config
+                .bossModeOverrideSource()
+        }
     var kernelMode by remember { mutableStateOf(false) }
     var needsRestart by remember { mutableStateOf(false) }
     val initialMode = remember { mutableStateOf<Boolean?>(null) }
@@ -51,7 +55,10 @@ fun AdvancedSettings() {
                         writeBossMode(enabled)
                     }
                 },
-                description = "Run plugins in isolated processes with gRPC IPC and AI self-healing",
+                enabled = modeOverride == null,
+                description =
+                    modeOverride?.let { "Controlled by $it" }
+                        ?: "Run plugins in isolated processes with gRPC IPC and AI self-healing",
             )
 
             if (needsRestart) {
@@ -183,15 +190,8 @@ fun AdvancedSettings() {
 
 private suspend fun readBossMode(): Boolean =
     withContext(Dispatchers.IO) {
-        val envFile = BossDirectories.resolve("env_vars")
-        if (!envFile.exists()) return@withContext false
-        try {
-            ai.rever.boss.config
-                .parseEnvVars(envFile.readLines(Charsets.UTF_8))
-                .getProperty("BOSS_MODE") == "KERNEL"
-        } catch (_: Exception) {
-            false
-        }
+        ai.rever.boss.config.ConfigLoader
+            .getConfig("BOSS_MODE") == "KERNEL"
     }
 
 private suspend fun writeBossMode(enabled: Boolean) =

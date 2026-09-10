@@ -31,11 +31,31 @@ internal fun withSavedBossMode(
     } + if (enabled) "BOSS_MODE=KERNEL" else "# BOSS_MODE=KERNEL"
 
 @Synchronized
-internal fun writeSavedBossMode(enabled: Boolean) {
-    val file =
+internal fun writeSavedBossMode(
+    enabled: Boolean,
+    file: java.io.File =
         ai.rever.boss.plugin.pathutils.BossDirectories
-            .resolve("env_vars")
+            .resolve("env_vars"),
+) {
     file.parentFile?.mkdirs()
     val lines = if (file.exists()) file.readLines(Charsets.UTF_8) else emptyList()
-    file.writeText(withSavedBossMode(lines, enabled).joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+    val partial = java.io.File.createTempFile("env_vars-", ".part", file.absoluteFile.parentFile)
+    try {
+        partial.writeText(withSavedBossMode(lines, enabled).joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+        java.nio.file.Files.move(
+            partial.toPath(),
+            file.toPath(),
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+        )
+    } finally {
+        partial.delete()
+    }
 }
+
+internal fun bossModeOverrideSource(): String? =
+    when {
+        !System.getenv("BOSS_MODE").isNullOrBlank() -> "BOSS_MODE environment variable"
+        !System.getProperty("BOSS_MODE").isNullOrBlank() -> "BOSS_MODE system property"
+        else -> null
+    }

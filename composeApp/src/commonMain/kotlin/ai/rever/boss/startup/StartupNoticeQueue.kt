@@ -13,7 +13,7 @@ import kotlinx.coroutines.sync.withLock
 
 internal const val KERNEL_NOTICE_DURATION_MS = 12_000L
 
-/** Retain the latest diagnostic per source; a cancelled wake-up never owns the diagnostic data. */
+/** Retain latest diagnostics per source. Cancellation favors at-least-once delivery over loss. */
 internal class StartupNoticeQueue {
     private val pending = MutableStateFlow<Map<String, String>>(emptyMap())
     private val wakeUp = Channel<Unit>(Channel.CONFLATED)
@@ -27,7 +27,7 @@ internal class StartupNoticeQueue {
                     if (batch.isNotEmpty()) {
                         pending.update { current -> current.filterNot { (key, value) -> batch[key] == value } }
                         try {
-                            emit(batch.values.joinToString(" "))
+                            emit(renderKernelNotices(batch))
                         } catch (cancelled: CancellationException) {
                             // Flow.first aborts after delivery while its job is still active.
                             // A cancelled window instead returns ownership to pending state.
@@ -50,3 +50,11 @@ internal class StartupNoticeQueue {
 }
 
 internal val kernelStartupNotices = StartupNoticeQueue()
+
+/** Status-bar space is finite; full per-service details are already in the kernel log. */
+internal fun renderKernelNotices(batch: Map<String, String>): String {
+    val repairs = batch.keys.count { it != "startup" }
+    if (repairs > 2) return "$repairs services need attention. Check service logs for details."
+    val text = batch.entries.sortedBy { it.key == "startup" }.joinToString(" · ") { it.value }
+    return if (text.length > 300) text.take(220) + "… See service logs for details." else text
+}
