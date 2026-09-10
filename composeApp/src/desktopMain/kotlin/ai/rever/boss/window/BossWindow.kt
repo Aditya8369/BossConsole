@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.Color
@@ -511,11 +512,27 @@ fun ApplicationScope.BossWindow(
                 Separator()
 
                 // Process Mode toggle
-                var isKernelMode by remember {
-                    mutableStateOf(
+                val modeRevision by ai.rever.boss.config.savedBossModeChanges
+                    .collectAsState()
+                val modeAvailable =
+                    remember {
+                        ai.rever.boss.config
+                            .kernelModeAvailable()
+                    }
+                val runningKernelMode =
+                    remember {
                         ai.rever.boss.config.ConfigLoader
-                            .bossModeForNextLaunch() == "KERNEL",
-                    )
+                            .getConfig("BOSS_MODE") == "KERNEL"
+                    }
+                var isKernelMode by remember { mutableStateOf(runningKernelMode) }
+                var modeSaveFailed by remember { mutableStateOf(false) }
+                LaunchedEffect(modeRevision) {
+                    modeSaveFailed = false
+                    isKernelMode =
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            ai.rever.boss.config.ConfigLoader
+                                .bossModeForNextLaunch() == "KERNEL"
+                        }
                 }
                 val modeOverride =
                     remember {
@@ -523,20 +540,28 @@ fun ApplicationScope.BossWindow(
                             .bossModeOverrideSource()
                     }
                 CheckboxItem(
-                    if (modeOverride == null) "Microkernel Mode" else "Microkernel Mode (externally controlled)",
-                    enabled = modeOverride == null,
+                    when {
+                        !modeAvailable -> "Microkernel Mode (unavailable)"
+                        modeOverride != null -> "Microkernel Mode (externally controlled)"
+                        modeSaveFailed -> "Microkernel Mode (save failed)"
+                        isKernelMode != runningKernelMode -> "Microkernel Mode (restart required)"
+                        else -> "Microkernel Mode"
+                    },
+                    enabled = modeOverride == null && modeAvailable,
                     checked = isKernelMode,
                     onCheckedChange = { enabled ->
+                        modeSaveFailed = false
                         // Save next-launch mode without changing the running kernel's configuration.
                         menuScope.launch {
                             val saved =
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                withContext(NonCancellable + Dispatchers.IO) {
                                     ai.rever.boss.config
                                         .saveBossMode(enabled)
                                 }
                             if (saved.isSuccess) {
                                 isKernelMode = enabled
                             } else {
+                                modeSaveFailed = true
                                 ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
                                     "Could not save process mode. Check preference-file permissions and logs.",
                                 )

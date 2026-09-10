@@ -403,6 +403,10 @@ local.properties. Reader and settings writers use `BossDirectories.resolve("env_
 `BOSS_MODE` is normalized to trimmed uppercase by ConfigLoader; runtime plugin gates must
 use that resolver rather than prefixing a raw getenv lookup. Nonblank environment/system
 property overrides own the setting, so the UI shows their source and disables the saved toggle.
+Disabling writes explicit `BOSS_MODE=MONOLITH`, which outranks local/embedded defaults.
+Settings reread next-launch preferences after each successful save across windows; the
+runtime snapshot must not be reloaded before restart. Builds without kernel classes show
+the mode as unavailable. Atomic preference writes preserve existing POSIX permissions.
 
 ### Credential brokers
 
