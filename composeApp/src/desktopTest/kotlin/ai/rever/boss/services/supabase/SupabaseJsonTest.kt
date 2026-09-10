@@ -68,14 +68,19 @@ class SupabaseJsonTest {
     @Test
     fun `the diagnostic half of the message survives`() {
         // Stripping the whole message would trade a credential leak for an undiagnosable
-        // outage. "Encountered an unknown key 'org_id'" is precisely what identified this bug.
-        val body = """[{"id":"1","org_id":null}]"""
+        // outage. "Encountered an unknown key 'org_id'" is precisely what identified BossConsole
+        // #146 - a real past incident, which is exactly why `org_id` is not the key used below
+        // any more: SecretEntry models it now (see SecretModels.kt), so a payload naming it is
+        // no longer an unknown-key failure at all. A still-genuinely-unmodeled name keeps this
+        // canary honest about what it tests: that the failing key's NAME survives sanitisation,
+        // not any particular key.
+        val body = """[{"id":"1","some_future_column":null}]"""
         val raw = runCatching { Json.decodeFromString<List<SecretEntry>>(body) }.exceptionOrNull()
 
         val safe = sanitizeSupabaseFailure("getUserSecrets", raw!!)
 
         assertTrue(safe.message.orEmpty().contains("getUserSecrets"), "operation name missing")
-        assertTrue(safe.message.orEmpty().contains("org_id"), "key name missing: ${safe.message}")
+        assertTrue(safe.message.orEmpty().contains("some_future_column"), "key name missing: ${safe.message}")
     }
 
     @Test
