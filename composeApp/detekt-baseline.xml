@@ -1156,11 +1156,11 @@
     <ID>ReturnCount:PluginInstallService.kt$PluginInstallService$private fun downloadFromGitHubRelease( owner: String, repo: String, pluginDir: File, ): String?</ID>
     <ID>ReturnCount:PluginLoaderDelegateImpl.kt$PluginLoaderDelegateImpl$private fun isMicrokernelRuntimeJar(jarPath: String): Boolean</ID>
     <ID>ReturnCount:PluginLoaderDelegateImpl.kt$PluginLoaderDelegateImpl$private suspend fun doReloadPlugin(pluginId: String): LoadedPluginInfo?</ID>
-    <ID>ReturnCount:PluginStoreSetup.kt$PluginStoreSetup$internal fun isNewerVersion( version1: String, version2: String, ): Boolean</ID>
     <ID>ReturnCount:PluginStoreSetup.kt$PluginStoreSetup$private fun copyBundledPluginsToPluginDir(dynamicPluginManager: ai.rever.boss.components.plugin.DynamicPluginManager)</ID>
     <ID>ReturnCount:PluginStoreVersionBridge.kt$PluginStoreVersionBridge$actual suspend fun lookup(pluginId: String): StoreVersionLookup</ID>
     <ID>ReturnCount:PluginUpdateBridge.kt$PluginUpdateBridge$actual suspend fun performUpdate( pluginId: String, manager: DynamicPluginManager, ): Result&lt;String&gt;</ID>
     <ID>ReturnCount:PluginUpdateBridge.kt$PluginUpdateBridge$actual suspend fun refreshAll(installed: List&lt;InstalledPluginRef&gt;)</ID>
+    <ID>ReturnCount:PluginVersionComparator.kt$PluginVersionComparator$fun isNewerVersion( version1: String, version2: String, ): Boolean</ID>
     <ID>ReturnCount:RoleService.kt$RoleService$suspend fun canPerformAction( userId: String, permissionName: String, ): Result&lt;Boolean&gt;</ID>
     <ID>ReturnCount:SecretModels.kt$CreateSecretRequest$fun validate(): Result&lt;Unit&gt;</ID>
     <ID>ReturnCount:SecretModels.kt$ShareSecretRequest$fun validate(): Result&lt;Unit&gt;</ID>

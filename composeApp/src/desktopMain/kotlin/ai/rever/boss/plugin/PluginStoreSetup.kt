@@ -28,13 +28,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URL
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Information about a system plugin that should always be installed.
@@ -512,7 +508,10 @@ object PluginStoreSetup {
                     if (installedIds.contains(systemPlugin.pluginId) && jarExists) {
                         val jarFile = File(existingEntry.jarPath)
                         val installedVersion =
-                            extractVersionFromJarFileName(jarFile.name, systemPlugin.artifactPrefix)
+                            PluginVersionComparator.extractVersionFromJarFileName(
+                                jarFile.name,
+                                systemPlugin.artifactPrefix,
+                            )
                                 ?: runCatching { readPluginManifest(jarFile)?.version }.getOrNull()
                         // Installed JAR is older than this host requires (or its
                         // version is unreadable, which only very old JARs are):
@@ -520,7 +519,8 @@ object PluginStoreSetup {
                         // contract-breaking version is never loaded. If the
                         // download fails (offline), the old JAR still loads and
                         // the update is retried next launch.
-                        val tooOldForHost = isTooOldForHost(installedVersion, systemPlugin.minVersion)
+                        val tooOldForHost =
+                            PluginVersionComparator.isTooOldForHost(installedVersion, systemPlugin.minVersion)
                         if (!tooOldForHost) {
                             // Plugin is on disk — proceed with startup using the
                             // current JAR. Kick off a background update check so
@@ -637,7 +637,7 @@ object PluginStoreSetup {
                 // every startup even though the fallback handles it. Manifest
                 // read is therefore only used when the filename lacks a version.
                 val installedVersion =
-                    extractVersionFromJarFileName(existingJar.name, systemPlugin.artifactPrefix)
+                    PluginVersionComparator.extractVersionFromJarFileName(existingJar.name, systemPlugin.artifactPrefix)
                         ?: runCatching { readPluginManifest(existingJar)?.version }.getOrNull()
                 val latestVersion = fetchLatestReleaseVersion(systemPlugin.githubRepo)
                 when {
@@ -675,7 +675,7 @@ object PluginStoreSetup {
                         )
                     }
 
-                    !isNewerVersion(latestVersion, installedVersion) -> {
+                    !PluginVersionComparator.isNewerVersion(latestVersion, installedVersion) -> {
                         // Installed version is NEWER than the latest published release —
                         // e.g. a local dev build ahead of the store. Do NOT downgrade:
                         // a download-only runtime update removes older versions, while a
@@ -808,24 +808,6 @@ object PluginStoreSetup {
                 connection?.disconnect()
             }
         }
-    }
-
-    /**
-     * Extract the semver component from a plugin JAR filename.
-     * Handles the `{prefix}-{version}.jar` and `{prefix}-{version}-all.jar`
-     * patterns produced by Gradle. Returns null if the filename doesn't match.
-     */
-    internal fun extractVersionFromJarFileName(
-        fileName: String,
-        artifactPrefix: String,
-    ): String? {
-        val withoutPrefix = fileName.removePrefix("$artifactPrefix-")
-        if (withoutPrefix == fileName) return null
-        val version =
-            withoutPrefix
-                .removeSuffix(".jar")
-                .removeSuffix("-all")
-        return version.takeIf { it.matches(Regex("""\d+\.\d+\.\d+(?:[-+.][A-Za-z0-9.]+)*""")) }
     }
 
     /**
@@ -1383,7 +1365,10 @@ object PluginStoreSetup {
                 // contract-breaking JAR the gate exists to prevent. Keep
                 // whatever is on disk and retry next launch instead.
                 val requiredMin = plugin.minVersion
-                if (requiredMin != null && isTooOldForHost(tagName.removePrefix("v"), requiredMin)) {
+                val tooOldRelease =
+                    requiredMin != null &&
+                        PluginVersionComparator.isTooOldForHost(tagName.removePrefix("v"), requiredMin)
+                if (tooOldRelease) {
                     logger.error(
                         LogCategory.SYSTEM,
                         "Latest GitHub release is older than this host requires - not installing",
@@ -1399,7 +1384,7 @@ object PluginStoreSetup {
 
                 // Find the JAR download URL (skips "-thin.jar" assets — see
                 // pickPluginJarUrl).
-                val jarUrl = pickPluginJarUrl(responseText, plugin.artifactPrefix)
+                val jarUrl = PluginVersionComparator.pickPluginJarUrl(responseText, plugin.artifactPrefix)
 
                 if (jarUrl == null) {
                     logger.warn(
@@ -1929,10 +1914,12 @@ object PluginStoreSetup {
                     val existingManifest = readPluginManifest(existingJar)
                     if (existingManifest != null) {
                         val existingVersion = existingManifest.version
-                        if (highestExistingVersion == null || isNewerVersion(existingVersion, highestExistingVersion)) {
+                        if (highestExistingVersion == null ||
+                            PluginVersionComparator.isNewerVersion(existingVersion, highestExistingVersion)
+                        ) {
                             highestExistingVersion = existingVersion
                         }
-                        if (!isNewerVersion(bundledVersion, existingVersion)) {
+                        if (!PluginVersionComparator.isNewerVersion(bundledVersion, existingVersion)) {
                             // Older hosts copied these bytes without a provenance marker. Bind
                             // only an exact bundle match; store updates and side-loads stay untrusted.
                             val bundledTrust = PluginBundledTrust.bindToBundle(existingJar.absolutePath, jarFile)
@@ -1963,7 +1950,9 @@ object PluginStoreSetup {
                     val existingJar = File(existingPlugin.jarPath)
                     if (existingJar.exists()) {
                         val existingManifest = readPluginManifest(existingJar)
-                        if (existingManifest != null && !isNewerVersion(bundledVersion, existingManifest.version)) {
+                        if (existingManifest != null &&
+                            !PluginVersionComparator.isNewerVersion(bundledVersion, existingManifest.version)
+                        ) {
                             val bundledTrust = PluginBundledTrust.bindToBundle(existingJar.absolutePath, jarFile)
                             logger.info(
                                 LogCategory.SYSTEM,
@@ -2184,178 +2173,5 @@ object PluginStoreSetup {
             )
             null
         }
-    }
-
-    /**
-     * Check if version1 is newer than version2.
-     *
-     * Numeric major.minor.patch comparison; a segment's non-numeric suffix
-     * counts only as its numeric prefix ("0-rc1" -> 0). On a numeric tie, a
-     * version WITH a pre-release suffix is OLDER than one without
-     * (1.4.0-rc1 < 1.4.0) — this comparator gates whether a system plugin
-     * satisfies the host's [SystemPluginInfo.minVersion], and a pre-release
-     * must not pass for its release. Internal for test access.
-     */
-    internal fun isNewerVersion(
-        version1: String,
-        version2: String,
-    ): Boolean {
-        fun numericParts(v: String) = v.split(".").map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
-
-        fun hasPreReleaseSuffix(v: String) = v.split(".").any { seg -> seg.any { !it.isDigit() } }
-
-        val v1Parts = numericParts(version1)
-        val v2Parts = numericParts(version2)
-
-        for (i in 0 until maxOf(v1Parts.size, v2Parts.size)) {
-            val v1 = v1Parts.getOrElse(i) { 0 }
-            val v2 = v2Parts.getOrElse(i) { 0 }
-            if (v1 > v2) return true
-            if (v1 < v2) return false
-        }
-        // Numeric tie: a release is newer than its own pre-release.
-        return hasPreReleaseSuffix(version2) && !hasPreReleaseSuffix(version1)
-    }
-
-    /**
-     * True when the host mandates a minimum plugin version and the installed
-     * version is below it — or can't be determined at all (only very old JARs
-     * lack a readable version). Internal for test access.
-     */
-    internal fun isTooOldForHost(
-        installedVersion: String?,
-        minVersion: String?,
-    ): Boolean {
-        if (minVersion == null) return false
-        return installedVersion == null || isNewerVersion(minVersion, installedVersion)
-    }
-
-    /**
-     * Pick the plugin JAR asset URL from a GitHub release JSON payload.
-     * Skips "-thin.jar" assets — a module's default :jar output, missing
-     * everything buildPluginJar bundles (editor-tab's BossEditor,
-     * fluck-browser's tunnel deps, …) — which GitHub can list first.
-     * Internal for test access.
-     */
-    internal fun pickPluginJarUrl(
-        releaseJson: String,
-        artifactPrefix: String,
-    ): String? =
-        Regex(""""browser_download_url"\s*:\s*"([^"]+${Regex.escape(artifactPrefix)}[^"]*\.jar)"""")
-            .findAll(releaseJson)
-            .map { it.groupValues[1] }
-            .firstOrNull { !it.endsWith("-thin.jar") }
-}
-
-/**
- * Coordinates authenticated signature backfill for installed system-plugin JARs.
- * Authentication avoids the store permission gate; update completion wakes deferred JARs.
- * Each completed attempt is counted even when unsigned: getDownloadUrl records a download,
- * so ordinary failures must not create a retry loop. A signature-only store route would
- * remove that cost (see #108). Cancellation and lost authentication may retry.
- * The supplied scope must dispatch file probes and persistence onto an I/O dispatcher.
- */
-internal class SidecarBackfillCoordinator(
-    private val scope: CoroutineScope,
-    private val sidecarExists: (File) -> Boolean,
-    private val updateInFlight: (String) -> Boolean,
-    private val persist: suspend (File) -> Unit,
-) {
-    private data class JarStamp(
-        val path: String,
-        val length: Long,
-        val modifiedAt: Long,
-    )
-
-    private data class PendingJar(
-        val pluginId: String,
-        val jarFile: File,
-        val stamp: JarStamp,
-    )
-
-    private data class AttemptKey(
-        val pluginId: String,
-        val stamp: JarStamp,
-    )
-
-    private val pending = ConcurrentHashMap<String, PendingJar>()
-    private val attempted = ConcurrentHashMap.newKeySet<AttemptKey>()
-    private val drainMutex = Mutex()
-    private val authenticationLosses = AtomicLong()
-
-    @Volatile
-    private var authenticated = false
-
-    fun setAuthenticated(available: Boolean) {
-        if (!available) authenticationLosses.incrementAndGet()
-        authenticated = available
-        if (available) requestDrain()
-    }
-
-    fun enqueue(
-        pluginId: String,
-        jarFile: File,
-    ) {
-        if (sidecarExists(jarFile)) return
-        val stamp = stampOf(jarFile) ?: return
-        pending[pluginId] = PendingJar(pluginId, jarFile, stamp)
-        requestDrain()
-    }
-
-    fun onUpdateCheckCompleted(pluginId: String) {
-        if (pending.containsKey(pluginId)) requestDrain()
-    }
-
-    private fun requestDrain() {
-        if (!authenticated) return
-        scope.launch {
-            drainMutex.withLock { drainOnce() }
-        }
-    }
-
-    private suspend fun drainOnce() {
-        if (!authenticated) return
-
-        pending.entries.toList().forEach { (_, entry) ->
-            if (!authenticated) return
-            if (!isCurrentAndUnsigned(entry)) {
-                pending.remove(entry.pluginId, entry)
-                return@forEach
-            }
-            if (updateInFlight(entry.pluginId)) return@forEach
-
-            val attemptKey = AttemptKey(entry.pluginId, entry.stamp)
-            if (!attempted.add(attemptKey)) {
-                pending.remove(entry.pluginId, entry)
-                return@forEach
-            }
-            if (!pending.remove(entry.pluginId, entry)) return@forEach
-
-            val authenticationGeneration = authenticationLosses.get()
-            try {
-                persist(entry.jarFile)
-                val lostAuthentication = !authenticated || authenticationGeneration != authenticationLosses.get()
-                if (lostAuthentication && !sidecarExists(entry.jarFile)) {
-                    attempted.remove(attemptKey)
-                    pending.putIfAbsent(entry.pluginId, entry)
-                }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                attempted.remove(attemptKey)
-                pending.putIfAbsent(entry.pluginId, entry)
-                throw cancelled
-            } catch (_: Exception) {
-                // Unexpected failures also consume the attempt, preventing wakeup-driven retries.
-            }
-        }
-    }
-
-    private fun isCurrentAndUnsigned(entry: PendingJar): Boolean {
-        val currentStamp = stampOf(entry.jarFile)
-        return currentStamp == entry.stamp && !sidecarExists(entry.jarFile)
-    }
-
-    private fun stampOf(jarFile: File): JarStamp? {
-        if (!jarFile.exists()) return null
-        return JarStamp(jarFile.absolutePath, jarFile.length(), jarFile.lastModified())
     }
 }
