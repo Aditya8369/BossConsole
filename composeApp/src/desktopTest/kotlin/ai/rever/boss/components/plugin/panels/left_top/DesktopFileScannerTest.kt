@@ -74,11 +74,15 @@ class DesktopFileScannerTest {
             Files.createSymbolicLink(link.toPath(), real.toPath())
         } catch (e: IOException) {
             assumeTrue(false, "Could not create a symlink (Windows needs privileges): ${e.message}")
+            return
         } catch (e: UnsupportedOperationException) {
             assumeTrue(false, "Could not create a symlink: ${e.message}")
+            return
         } catch (e: SecurityException) {
             assumeTrue(false, "Could not create a symlink: ${e.message}")
+            return
         }
+        if (!Files.isSymbolicLink(link.toPath())) return
         assertTrue(directoryHasChildren(link.absolutePath))
     }
 

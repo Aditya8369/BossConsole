@@ -702,6 +702,10 @@ class KernelBootstrap(
                 } catch (_: Exception) {
                     "${System.getProperty("user.home")}/.boss"
                 }
+        val orchestratorJar = resolveServiceJar(bossDataDir, "boss-orchestrator-all.jar")
+        val authJar = resolveServiceJar(bossDataDir, "boss-service-auth-all.jar")
+        val masteryOrchestratorJar = resolveServiceJar(bossDataDir, "boss-mastery-orchestrator-all.jar")
+        val workspaceJar = resolveServiceJar(bossDataDir, "boss-service-workspace-all.jar")
         val settingsJar = resolveServiceJar(bossDataDir, "boss-service-settings-all.jar")
         val filesystemJar = resolveServiceJar(bossDataDir, "boss-service-filesystem-all.jar")
         val terminalJar = resolveServiceJar(bossDataDir, "boss-app-terminal-all.jar")
