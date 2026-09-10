@@ -558,9 +558,7 @@ fun ApplicationScope.BossWindow(
                                     ai.rever.boss.config
                                         .saveBossMode(enabled)
                                 }
-                            if (saved.isSuccess) {
-                                isKernelMode = enabled
-                            } else {
+                            if (saved.isFailure) {
                                 modeSaveFailed = true
                                 ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
                                     "Could not save process mode. Check preference-file permissions and logs.",
