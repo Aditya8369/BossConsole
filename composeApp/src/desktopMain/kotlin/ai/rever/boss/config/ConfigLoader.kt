@@ -14,6 +14,11 @@ object ConfigLoader {
     private val properties = Properties()
 
     /**
+     * Config loaded from ~/.boss/env_vars file (managed by UI settings).
+     */
+    private val envVarsProperties = Properties()
+
+    /**
      * Config baked into the app at build time by the generateEmbeddedConfig
      * Gradle task (from CI secrets or the developer's local.properties). This
      * is how packaged apps on end-user machines — which have no env vars or
@@ -24,8 +29,53 @@ object ConfigLoader {
 
     init {
         loadLocalProperties()
+        loadEnvVarsProperties()
         loadEmbeddedProperties()
     }
+
+    /**
+     * Loads properties from ~/.boss/env_vars file if it exists.
+     */
+    fun loadEnvVarsProperties() {
+        try {
+            envVarsProperties.clear()
+            val envFile = resolveEnvVarsFile()
+            if (envFile != null && envFile.exists()) {
+                parseEnvVars(envFile)
+                logger.debug(
+                    LogCategory.SYSTEM,
+                    "Loaded properties from env_vars",
+                    mapOf("count" to envVarsProperties.size),
+                )
+            }
+        } catch (e: Exception) {
+            logger.warn(LogCategory.SYSTEM, "Could not load env_vars", error = e)
+        }
+    }
+
+    private fun parseEnvVars(file: File) {
+        for (line in file.readLines(Charsets.UTF_8)) {
+            val trimmed = line.trim()
+            if (trimmed.isBlank() || trimmed.startsWith("#")) continue
+            val parts = trimmed.split("=", limit = 2)
+            if (parts.size == 2 && parts[0].isNotBlank()) {
+                envVarsProperties.setProperty(parts[0].trim(), parts[1].trim())
+            }
+        }
+    }
+
+    private fun resolveEnvVarsFile(): File? =
+        try {
+            val dirsCls = Class.forName("ai.rever.boss.plugin.pathutils.BossDirectories")
+            val dirsInst = dirsCls.getDeclaredField("INSTANCE").get(null)
+            dirsCls.getMethod("resolve", String::class.java).invoke(dirsInst, "env_vars") as? File
+        } catch (_: ReflectiveOperationException) {
+            val bossDataDir = System.getenv("BOSS_DATA_DIR") ?: "${System.getProperty("user.home")}/.boss"
+            File(bossDataDir, "env_vars")
+        } catch (_: SecurityException) {
+            val bossDataDir = System.getenv("BOSS_DATA_DIR") ?: "${System.getProperty("user.home")}/.boss"
+            File(bossDataDir, "env_vars")
+        }
 
     /**
      * Loads properties from local.properties file if it exists.
@@ -91,8 +141,9 @@ object ConfigLoader {
      * 1. System environment variable
      * 2. System property
      * 3. local.properties file
-     * 4. Embedded build config (baked in at build time from CI secrets)
-     * 5. Default value
+     * 4. ~/.boss/env_vars file
+     * 5. Embedded build config (baked in at build time from CI secrets)
+     * 6. Default value
      */
     fun getConfig(
         key: String,
@@ -103,8 +154,9 @@ object ConfigLoader {
             defaultValue = defaultValue,
             envValue = System.getenv(key),
             sysPropValue = System.getProperty(key),
-            localProps = properties,
-            embeddedProps = embeddedProperties,
+            properties,
+            envVarsProperties,
+            embeddedProperties,
         )
 
     /**
@@ -116,13 +168,11 @@ object ConfigLoader {
         defaultValue: String?,
         envValue: String?,
         sysPropValue: String?,
-        localProps: Properties,
-        embeddedProps: Properties,
+        vararg propertySources: Properties,
     ): String? =
         envValue.orNullIfBlank()
             ?: sysPropValue.orNullIfBlank()
-            ?: localProps.getProperty(key).orNullIfBlank()
-            ?: embeddedProps.getProperty(key).orNullIfBlank()
+            ?: propertySources.firstNotNullOfOrNull { it.getProperty(key).orNullIfBlank() }
             // NOT blank-filtered: a caller that passes "" as its default has said so explicitly,
             // unlike an exported variable that merely happens to be empty.
             ?: defaultValue

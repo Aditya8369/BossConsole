@@ -1,8 +1,10 @@
 package ai.rever.boss.components.plugin.panels.left_top
 
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -68,7 +70,15 @@ class DesktopFileScannerTest {
         File(real, "file.txt").writeText("hi")
         val linkDir = tempDir()
         val link = File(linkDir, "link")
-        Files.createSymbolicLink(link.toPath(), real.toPath())
+        try {
+            Files.createSymbolicLink(link.toPath(), real.toPath())
+        } catch (e: IOException) {
+            assumeTrue(false, "Could not create a symlink (Windows needs privileges): ${e.message}")
+        } catch (e: UnsupportedOperationException) {
+            assumeTrue(false, "Could not create a symlink: ${e.message}")
+        } catch (e: SecurityException) {
+            assumeTrue(false, "Could not create a symlink: ${e.message}")
+        }
         assertTrue(directoryHasChildren(link.absolutePath))
     }
 
