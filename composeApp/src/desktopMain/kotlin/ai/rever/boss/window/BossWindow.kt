@@ -511,7 +511,7 @@ fun ApplicationScope.BossWindow(
                 Separator()
 
                 // Process Mode toggle
-                val isKernelMode =
+                val liveKernelMode =
                     remember {
                         val mode =
                             System.getenv("BOSS_MODE")
@@ -519,29 +519,40 @@ fun ApplicationScope.BossWindow(
                                     .getConfig("BOSS_MODE")
                         mode == "KERNEL"
                     }
+                var configuredKernelMode by remember { mutableStateOf(liveKernelMode) }
+                var modeSaveFailed by remember { mutableStateOf(false) }
+                val isRestartRequired = configuredKernelMode != liveKernelMode
+                val labelSuffix = microkernelModeLabelSuffix(isRestartRequired = isRestartRequired, modeSaveFailed = modeSaveFailed)
+
                 CheckboxItem(
-                    "Microkernel Mode",
-                    checked = isKernelMode,
-                    onCheckedChange = {
+                    "Microkernel Mode$labelSuffix",
+                    checked = configuredKernelMode,
+                    onCheckedChange = { checked ->
                         // Toggle in env_vars file; requires restart
                         menuScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            val envFile =
-                                ai.rever.boss.plugin.pathutils.BossDirectories
-                                    .resolve("env_vars")
-                            envFile.parentFile?.mkdirs()
-                            if (!envFile.exists()) {
-                                envFile.writeText(if (it) "BOSS_MODE=KERNEL\n" else "# BOSS_MODE=KERNEL\n", Charsets.UTF_8)
-                            } else {
-                                val lines = envFile.readLines(Charsets.UTF_8).toMutableList()
-                                val idx = lines.indexOfFirst { l -> l.trimStart('#', ' ').startsWith("BOSS_MODE") }
-                                val newLine = if (it) "BOSS_MODE=KERNEL" else "# BOSS_MODE=KERNEL"
-                                if (idx >= 0) {
-                                    lines[idx] = newLine
+                            try {
+                                val envFile =
+                                    ai.rever.boss.plugin.pathutils.BossDirectories
+                                        .resolve("env_vars")
+                                envFile.parentFile?.mkdirs()
+                                if (!envFile.exists()) {
+                                    envFile.writeText(if (checked) "BOSS_MODE=KERNEL\n" else "# BOSS_MODE=KERNEL\n", Charsets.UTF_8)
                                 } else {
-                                    lines.add("")
-                                    lines.add(newLine)
+                                    val lines = envFile.readLines(Charsets.UTF_8).toMutableList()
+                                    val idx = lines.indexOfFirst { l -> l.trimStart('#', ' ').startsWith("BOSS_MODE") }
+                                    val newLine = if (checked) "BOSS_MODE=KERNEL" else "# BOSS_MODE=KERNEL"
+                                    if (idx >= 0) {
+                                        lines[idx] = newLine
+                                    } else {
+                                        lines.add("")
+                                        lines.add(newLine)
+                                    }
+                                    envFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
                                 }
-                                envFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
+                                configuredKernelMode = checked
+                                modeSaveFailed = false
+                            } catch (_: Exception) {
+                                modeSaveFailed = true
                             }
                         }
                     },
@@ -1436,3 +1447,25 @@ fun ApplicationScope.BossWindow(
 fun BossWindowState.updateTitle(newTitle: String) {
     this.title = newTitle
 }
+
+/**
+ * Computes the status suffix for the Microkernel Mode menu item.
+ *
+ * Prioritizes the restart-required status over the save-failed status so that a
+ * pending restart can never be masked by a previous save error.
+ */
+internal fun microkernelModeLabelSuffix(
+    isRestartRequired: Boolean,
+    modeSaveFailed: Boolean,
+): String =
+    when {
+        isRestartRequired -> " (restart required)"
+        modeSaveFailed -> " (save failed)"
+        else -> ""
+    }
+
+internal fun microkernelModeItemLabel(
+    isRestartRequired: Boolean,
+    modeSaveFailed: Boolean,
+): String = "Microkernel Mode${microkernelModeLabelSuffix(isRestartRequired, modeSaveFailed)}"
+
