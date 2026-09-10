@@ -3,6 +3,7 @@ package ai.rever.boss.plugin
 import ai.rever.boss.config.GitHubConfig
 import ai.rever.boss.config.SupabaseClientConfig
 import ai.rever.boss.plugin.loader.PluginBundledTrust
+import ai.rever.boss.plugin.loader.PluginManifestReader
 import ai.rever.boss.plugin.loader.PluginSignatureEnforcement
 import ai.rever.boss.plugin.loader.PluginSignatureSidecar
 import ai.rever.boss.plugin.loader.PluginStoreTrust
@@ -366,11 +367,16 @@ object PluginStoreSetup {
                     )
                     PluginStoreConfig.accessToken = token
 
-                    // Signature backfill waits for this token because the store's
-                    // install-permission gate rejects unauthenticated callers.
+                    // Signature backfill and store repair wait for this token because the
+                    // store's install-permission gate rejects unauthenticated callers.
                     // Recording readiness also wakes JARs queued after an earlier
                     // authenticated emission.
                     sidecarBackfill.setAuthenticated(token != null)
+                    if (token == null) {
+                        storeRepairAuthenticationLosses.incrementAndGet()
+                    } else {
+                        scope.launch { maybeDrainStoreRepair() }
+                    }
                 }
             }
 
@@ -1073,6 +1079,241 @@ object PluginStoreSetup {
         sidecarBackfill.enqueue(pluginId, jarFile)
     }
 
+    /** Match the manifest identity; artifact prefixes can also prefix a different plugin's name. */
+    private fun installedJarFor(plugin: SystemPluginInfo): File? =
+        _pluginDir.listFiles()?.firstOrNull { file ->
+            file.name.endsWith(".jar") &&
+                runCatching {
+                    PluginManifestReader.readFromJar(file.absolutePath).pluginId == plugin.pluginId
+                }.getOrDefault(false)
+        }
+
+    /** JARs the GitHub path could not supply, to retry through the store. */
+    private val storeRepairQueue = java.util.concurrent.ConcurrentLinkedQueue<Pair<SystemPluginInfo, String>>()
+
+    /** Serialises repair passes so two triggers cannot install the same JAR twice. */
+    private val storeRepairMutex = Mutex()
+    private val systemPluginDownloadLocks = ConcurrentHashMap<String, Mutex>()
+    private val storeRepairAuthenticationLosses = AtomicLong()
+
+    /**
+     * Plugin ids a store repair has already been spent on this process.
+     *
+     * Bounds the retries a repeatable drain allows. A plugin whose store row is
+     * genuinely absent must not re-cost a lookup every time something triggers the
+     * pass; the next launch tries again, which is the right cadence for a fault
+     * that is usually an outage.
+     */
+    private val storeRepairAttempted: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet()
+
+    /**
+     * Note that the GitHub path could not supply [plugin], with the concrete
+     * [reason], so the store can be tried instead.
+     *
+     * The GitHub miss is not the interesting failure. `system-plugins.json` routes
+     * the headline surfaces (Terminal Tab, Fluck Browser, Editor Tab) through
+     * GitHub Releases, and an unauthenticated host gets 60 API calls an hour
+     * shared across everything on its egress IP. A CI runner, an agent VM or an
+     * office NAT burns that quickly, and the same plugins install fine from the
+     * store moments later. Treating the miss as terminal is what leaves a
+     * signed-in BOSS without a terminal, a browser or an editor.
+     *
+     * This pass repairs missing plugins, not upgrades of JARs already on disk.
+     * Version/IPC refusals in the GitHub path retain their existing policy even
+     * when the plugin is absent: selecting an alternative compatible release is
+     * outside this availability fallback. Store downloads independently enforce
+     * those gates before publishing any bytes.
+     */
+    private fun noteStoreRepairable(
+        plugin: SystemPluginInfo,
+        reason: String,
+    ) {
+        if (!StoreRepairArtifact.supports(plugin)) return
+        storeRepairQueue.add(plugin to reason)
+        // Never await here: GitHub holds the per-plugin lock, and the drain takes
+        // storeRepairMutex before that lock. An inline drain would close a lock cycle.
+        scope.launch { maybeDrainStoreRepair() }
+    }
+
+    /** What [maybeDrainStoreRepair] should do with one queued plugin. */
+    internal enum class RepairDisposition {
+        /** Another path already put a JAR on disk; nothing to repair. */
+        ALREADY_PRESENT,
+
+        /** This plugin has already spent its one store attempt this process. */
+        ALREADY_ATTEMPTED,
+
+        /** Try the store. */
+        REPAIR,
+    }
+
+    /**
+     * The per-plugin decision, extracted so the ordering is pinned by tests rather
+     * than living inside a network call.
+     *
+     * [jarPresent] is tested first and is re-read at drain time rather than when
+     * the entry was queued. Between the two, a background update check or a
+     * realtime manifest re-run can have installed the plugin by the ordinary
+     * route, and downloading a second copy would leave two versions in the plugin
+     * dir for `PluginJarReconciler` to clean up after. This prevents the store
+     * from duplicating a completed GitHub install; GitHub update callers may still
+     * publish a newer release after a store repair, for next-launch reconciliation.
+     */
+    internal fun repairDisposition(
+        jarPresent: Boolean,
+        alreadyAttempted: Boolean,
+    ): RepairDisposition =
+        when {
+            jarPresent -> RepairDisposition.ALREADY_PRESENT
+            alreadyAttempted -> RepairDisposition.ALREADY_ATTEMPTED
+            else -> RepairDisposition.REPAIR
+        }
+
+    /**
+     * Install any system plugin the GitHub path could not supply from the store.
+     *
+     * Deferred rather than run inline at the point of failure, and that ordering is
+     * the whole point. [PluginStoreConfig.accessToken] is still null while
+     * `ensureSystemPluginsInstalled` runs from `initialize()`, and the store
+     * download route 403s an unauthenticated caller for any plugin with non-empty
+     * `requiredPermissions`, which is exactly the set this targets. An inline
+     * fallback would therefore fail for the same plugins on every launch and look
+     * like the fix was in. Confirmed on BossConsole#399 by a second reporter whose
+     * agent VM cannot hold a durable `GITHUB_TOKEN` at all, so for them the
+     * unauthenticated Releases path is the normal case rather than an edge one.
+     *
+     * Safe to call from anywhere, as often as you like: guarded by
+     * [storeRepairMutex], returns immediately while unauthenticated, and each
+     * plugin costs at most one store attempt per process.
+     */
+    private suspend fun maybeDrainStoreRepair() {
+        if (storeRepairQueue.isEmpty() || PluginStoreConfig.accessToken == null) return
+        storeRepairMutex.withLock {
+            withContext(Dispatchers.IO) {
+                // Re-read under the lock: a sign-out between the cheap pre-check and
+                // here would spend every plugin's one attempt on a guaranteed 403.
+                if (PluginStoreConfig.accessToken == null) return@withContext
+                generateSequence {
+                    if (PluginStoreConfig.accessToken != null) storeRepairQueue.poll() else null
+                }.forEach { (plugin, reason) ->
+                    val disposition =
+                        repairDisposition(
+                            jarPresent = installedJarFor(plugin) != null,
+                            alreadyAttempted = plugin.pluginId in storeRepairAttempted,
+                        )
+                    if (disposition == RepairDisposition.REPAIR) {
+                        storeRepairAttempted.add(plugin.pluginId)
+                        val authenticationGeneration = storeRepairAuthenticationLosses.get()
+                        try {
+                            systemPluginDownloadLocks.computeIfAbsent(plugin.pluginId) { Mutex() }.withLock {
+                                if (PluginStoreConfig.accessToken != null && installedJarFor(plugin) == null) {
+                                    repairFromStore(plugin, reason)
+                                }
+                            }
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            storeRepairAttempted.remove(plugin.pluginId)
+                            storeRepairQueue.add(plugin to reason)
+                            throw cancelled
+                        }
+                        val lostAuthentication =
+                            PluginStoreConfig.accessToken == null ||
+                                authenticationGeneration != storeRepairAuthenticationLosses.get()
+                        if (lostAuthentication && installedJarFor(plugin) == null) {
+                            storeRepairAttempted.remove(plugin.pluginId)
+                            storeRepairQueue.add(plugin to reason)
+                        }
+                    } else {
+                        logger.debug(
+                            LogCategory.SYSTEM,
+                            "Skipping store repair",
+                            mapOf("pluginId" to plugin.pluginId, "why" to disposition.name),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Fetch [plugin] from the store and put it where the next launch will find it.
+     *
+     * Reported at WARN on both outcomes, carrying the GitHub [reason] that sent us
+     * here. A silent success would hide that the GitHub channel is broken for this
+     * install, and a silent failure is the state BossConsole#399 was filed about:
+     * the wizard's own log said only "Some plugins failed to install", so an
+     * operator could not tell a rate limit from a missing asset from a signature
+     * refusal without reading the host log.
+     *
+     * The JAR is not loaded into the running app. Doing that needs a
+     * `DynamicPluginManager`, and those are per-window while this object is
+     * process-wide, so holding one here would pin a window's manager and its
+     * classloaders for the life of the process. That is the leak this repo already
+     * guards against elsewhere, and it is not worth introducing to save a restart.
+     * See the PR for the follow-up shape.
+     */
+    private suspend fun repairFromStore(
+        plugin: SystemPluginInfo,
+        reason: String,
+    ) {
+        val manager = _remoteRepository
+        if (manager == null) {
+            logger.warn(
+                LogCategory.SYSTEM,
+                "System plugin left uninstalled - GitHub failed and no repository is available",
+                mapOf("pluginId" to plugin.pluginId, "githubReason" to reason),
+            )
+            return
+        }
+
+        var tmp: File? = null
+        try {
+            tmp = File.createTempFile("${plugin.pluginId}-store-repair-", ".jar.part", _pluginDir)
+            val info = manager.getPlugin(plugin.pluginId).getOrThrow() ?: error("no store row for ${plugin.pluginId}")
+            val downloaded = File(manager.downloadPlugin(plugin.pluginId, info.version, tmp.absolutePath).getOrThrow())
+            // Another install may have finished while the network call was suspended.
+            if (installedJarFor(plugin) != null) return
+            val manifest = readPluginManifest(downloaded) ?: error("Store JAR has no readable plugin manifest")
+            val dest = StoreRepairArtifact.promote(plugin, downloaded, manifest, info.version)
+            val existing = PluginPersistence.getInstalledPlugins().find { it.pluginId == plugin.pluginId }
+            PluginPersistence.addInstalledPlugin(
+                pluginId = plugin.pluginId,
+                jarPath = dest.absolutePath,
+                enabled = existing?.enabled ?: true,
+                sourceUrl = existing?.sourceUrl,
+                installedVersion = manifest.version,
+            )
+            logger.warn(
+                LogCategory.SYSTEM,
+                "System plugin repaired from the store after GitHub failed - active next launch",
+                mapOf("pluginId" to plugin.pluginId, "version" to manifest.version, "githubReason" to reason),
+            )
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            logger.warn(
+                LogCategory.SYSTEM,
+                "System plugin left uninstalled - GitHub failed and the store could not supply it",
+                mapOf("pluginId" to plugin.pluginId, "githubReason" to reason, "storeError" to e.toString()),
+            )
+        } finally {
+            tmp?.let {
+                it.delete()
+                PluginSignatureSidecar.delete(it.absolutePath)
+            }
+        }
+    }
+
+    /** Serialize both download channels per plugin while keeping network and file work on I/O. */
+    private suspend fun <T> withSystemPluginDownloadLock(
+        plugin: SystemPluginInfo,
+        action: suspend () -> T,
+    ): T =
+        systemPluginDownloadLocks.computeIfAbsent(plugin.pluginId) { Mutex() }.withLock {
+            withContext(Dispatchers.IO) { action() }
+        }
+
     /**
      * Download a system plugin from GitHub releases.
      *
@@ -1080,7 +1321,7 @@ object PluginStoreSetup {
      * @return true if download was successful, false otherwise
      */
     private suspend fun downloadSystemPluginFromGitHub(plugin: SystemPluginInfo): Boolean {
-        return withContext(Dispatchers.IO) {
+        return withSystemPluginDownloadLock(plugin) {
             try {
                 val apiUrl = "https://api.github.com/repos/${plugin.githubRepo}/releases/latest"
                 logger.debug(
@@ -1113,7 +1354,8 @@ object PluginStoreSetup {
                             "hint" to "set GITHUB_TOKEN in env or local.properties to raise the limit from 60/hr to 5000/hr",
                         ),
                     )
-                    return@withContext false
+                    noteStoreRepairable(plugin, "GitHub API rate limit (status $status)")
+                    return@withSystemPluginDownloadLock false
                 }
                 if (status !in 200..299) {
                     logger.warn(
@@ -1124,7 +1366,8 @@ object PluginStoreSetup {
                             "status" to status,
                         ),
                     )
-                    return@withContext false
+                    noteStoreRepairable(plugin, "GitHub releases API returned $status")
+                    return@withSystemPluginDownloadLock false
                 }
 
                 val responseText = connection.inputStream.bufferedReader().readText()
@@ -1151,7 +1394,7 @@ object PluginStoreSetup {
                             "minVersion" to requiredMin,
                         ),
                     )
-                    return@withContext false
+                    return@withSystemPluginDownloadLock false
                 }
 
                 // Find the JAR download URL (skips "-thin.jar" assets — see
@@ -1168,7 +1411,8 @@ object PluginStoreSetup {
                             "tag" to tagName,
                         ),
                     )
-                    return@withContext false
+                    noteStoreRepairable(plugin, "no JAR asset in GitHub release $tagName")
+                    return@withSystemPluginDownloadLock false
                 }
                 val jarFileName = jarUrl.substringAfterLast("/")
                 val destFile = File(_pluginDir, jarFileName)
@@ -1222,7 +1466,8 @@ object PluginStoreSetup {
                             "file" to tmpFile.absolutePath,
                         ),
                     )
-                    return@withContext false
+                    noteStoreRepairable(plugin, "GitHub downloaded an empty or missing JAR")
+                    return@withSystemPluginDownloadLock false
                 }
 
                 // IPC-compat gate: if the fetched JAR declares a minIpcVersion
@@ -1258,7 +1503,7 @@ object PluginStoreSetup {
                             "reason" to ipcReason,
                         ),
                     )
-                    return@withContext false
+                    return@withSystemPluginDownloadLock false
                 }
 
                 // Atomic rename onto the final path. Overwrite if the file
@@ -1371,6 +1616,7 @@ object PluginStoreSetup {
                     ),
                     e,
                 )
+                queueStoreRepairAfterGitHubFailure(e) { reason -> noteStoreRepairable(plugin, reason) }
                 false
             }
         }
