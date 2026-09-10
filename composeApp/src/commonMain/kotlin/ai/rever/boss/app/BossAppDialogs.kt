@@ -808,11 +808,11 @@ internal fun BossAppDialogs(state: BossAppState) {
         McpApprovalDialog(
             request = approvalRequest,
             pendingQueueSize = pendingList.size,
-            onApprove = { trustForSession ->
-                McpToolRegistryImpl.approvalBus.approve(approvalRequest.id, trustForSession)
+            onApprove = { trustForSession, persistPolicy ->
+                McpToolRegistryImpl.approvalBus.approve(approvalRequest.id, trustForSession, persistPolicy)
             },
-            onDeny = { reason ->
-                McpToolRegistryImpl.approvalBus.deny(approvalRequest.id, reason)
+            onDeny = { reason, persistPolicy ->
+                McpToolRegistryImpl.approvalBus.deny(approvalRequest.id, reason, persistPolicy)
             },
         )
     }

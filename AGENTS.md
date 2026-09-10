@@ -1099,8 +1099,18 @@ plugins. Unknown tool names default to ALLOW. Known mutations default to ASK wit
 a 45-second timeout. Each queued prompt is delivered to exactly one window and
 window teardown denies its owned request. Session trust is process-wide and can
 be cleared using “Revoke MCP session trust” in the bottom bar; restore the bar if
-it is hidden. Persistent rules currently require editing ~/.boss/mcp-tool-policy.json
-and restarting. Preserve a backup before manual recovery of a damaged policy;
+it is hidden. The approval dialog offers Always Allow and Always Deny, which save
+a tool-wide rule for all agents and arguments across restarts. Saved rules can be
+reviewed and reset from “Persisted MCP policies” in the bottom bar; a reset removes
+the rule and clears that tool's session trust, so the tool uses the configured default
+policy (ASK for known mutations in the shipped defaults). Unrelated DENYs remain intact.
+A failed reset keeps the previous durable rule visible and clears the selected session
+trust; it does not promise ASK if a saved ALLOW remains. Failed approval writes record
+POLICY_PERSIST_FAILED and withhold the current execution. A queued approval cannot
+replace a newer DENY or reset: each reset invalidates older authorizations before their
+final approval boundary, including queued once/session/persistent grants. Calls already
+authorized to execute are not cancelled. Reset remains host UI only, not an MCP tool.
+Preserve a backup before manual recovery of a damaged policy;
 the fault flow withholds all tools until recovery. No automatic quarantine UI is
 provided. Ledger redaction is bounded and best effort, not a guarantee for secrets
 under arbitrary keys. Queue overflow and cancellation before/after dispatch have
