@@ -511,13 +511,12 @@ fun ApplicationScope.BossWindow(
                 Separator()
 
                 // Process Mode toggle
-                val isKernelMode =
-                    remember {
-                        val mode =
-                            ai.rever.boss.config.ConfigLoader
-                                .getConfig("BOSS_MODE")
-                        mode.equals("KERNEL", ignoreCase = true)
-                    }
+                var isKernelMode by remember {
+                    mutableStateOf(
+                        ai.rever.boss.config.ConfigLoader
+                            .bossModeForNextLaunch() == "KERNEL",
+                    )
+                }
                 val modeOverride =
                     remember {
                         ai.rever.boss.config
@@ -527,11 +526,21 @@ fun ApplicationScope.BossWindow(
                     if (modeOverride == null) "Microkernel Mode" else "Microkernel Mode (externally controlled)",
                     enabled = modeOverride == null,
                     checked = isKernelMode,
-                    onCheckedChange = {
-                        // Toggle in env_vars file; requires restart
-                        menuScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            ai.rever.boss.config
-                                .writeSavedBossMode(it)
+                    onCheckedChange = { enabled ->
+                        // Save next-launch mode without changing the running kernel's configuration.
+                        menuScope.launch {
+                            val saved =
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    ai.rever.boss.config
+                                        .saveBossMode(enabled)
+                                }
+                            if (saved.isSuccess) {
+                                isKernelMode = enabled
+                            } else {
+                                ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
+                                    "Could not save process mode. Check preference-file permissions and logs.",
+                                )
+                            }
                         }
                     },
                 )

@@ -268,7 +268,7 @@ fun BossRightBottomBar() {
             overflow = TextOverflow.Ellipsis,
             color = BossTheme.colors.ok, // Green color for success
             fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.widthIn(max = 560.dp).padding(horizontal = 8.dp),
         )
     }
 
