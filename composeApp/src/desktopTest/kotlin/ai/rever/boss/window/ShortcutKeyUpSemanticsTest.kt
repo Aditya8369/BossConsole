@@ -45,8 +45,11 @@ class ShortcutKeyUpSemanticsTest {
 
     @Suppress("DEPRECATION")
     private val primaryModifierMask =
-        if (SystemUtils.isMacOS) (InputEvent.META_DOWN_MASK or InputEvent.META_MASK)
-        else (InputEvent.CTRL_DOWN_MASK or InputEvent.CTRL_MASK)
+        if (SystemUtils.isMacOS) {
+            InputEvent.META_DOWN_MASK or InputEvent.META_MASK
+        } else {
+            InputEvent.CTRL_DOWN_MASK or InputEvent.CTRL_MASK
+        }
     private val modifierKeyCode =
         if (SystemUtils.isMacOS) KeyEvent.VK_META else KeyEvent.VK_CONTROL
 
@@ -54,13 +57,14 @@ class ShortcutKeyUpSemanticsTest {
     fun setUp() {
         testScope = CoroutineScope(Dispatchers.Unconfined)
         newTabEventCount.set(0)
-        collectorJob = testScope.launch {
-            MenuActionsHandler.newTabEvents.collect { winId ->
-                if (winId == windowId) {
-                    newTabEventCount.incrementAndGet()
+        collectorJob =
+            testScope.launch {
+                MenuActionsHandler.newTabEvents.collect { winId ->
+                    if (winId == windowId) {
+                        newTabEventCount.incrementAndGet()
+                    }
                 }
             }
-        }
 
         AWTKeyboardInterceptor.install()
         frame = JFrame("Test Frame")
@@ -95,8 +99,7 @@ class ShortcutKeyUpSemanticsTest {
         testScope.cancel()
     }
 
-    private fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        AWTKeyboardInterceptor.processKeyEvent(event)
+    private fun dispatchKeyEvent(event: KeyEvent): Boolean = AWTKeyboardInterceptor.processKeyEvent(event)
 
     @Test
     fun `matching KEY_PRESSED arms pending shortcut and consumes without action dispatch`() {
@@ -114,7 +117,10 @@ class ShortcutKeyUpSemanticsTest {
 
         assertTrue(consumed, "KeyDown matching shortcut must be consumed")
         assertTrue(keyDown.isConsumed, "KeyEvent must be marked consumed")
-        assertTrue(AWTKeyboardInterceptor.hasPendingShortcut(), "AWTKeyboardInterceptor must have pending shortcut armed")
+        assertTrue(
+            AWTKeyboardInterceptor.hasPendingShortcut(),
+            "AWTKeyboardInterceptor must have pending shortcut armed",
+        )
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched on key-down")
     }
 
@@ -211,7 +217,10 @@ class ShortcutKeyUpSemanticsTest {
 
         assertFalse(consumed, "Releasing modifier alone should not be consumed as shortcut execution")
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched when modifier is released alone")
-        assertFalse(AWTKeyboardInterceptor.hasPendingShortcut(), "Pending shortcut must be cancelled on modifier release")
+        assertFalse(
+            AWTKeyboardInterceptor.hasPendingShortcut(),
+            "Pending shortcut must be cancelled on modifier release",
+        )
 
         // Subsequent primary key release does nothing
         val keyUp =

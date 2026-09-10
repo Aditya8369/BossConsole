@@ -92,64 +92,64 @@ class KeymapHandler(
         event: KeyEvent,
         context: ShortcutContext,
         executor: (actionId: String) -> Boolean,
-    ): Boolean {
+    ): Boolean =
         when (event.type) {
-            KeyEventType.KeyDown -> {
-                if (event.key in MODIFIER_ONLY_KEYS) {
-                    return false
-                }
-
-                // Check auto-repeat for the pending primary key
-                val currentPending = pendingShortcut
-                if (currentPending != null && currentPending.primaryKey == event.key) {
-                    return true
-                }
-
-                // Match the event to a binding
-                val binding = matcher.match(event, context)
-                if (binding != null) {
-                    pendingShortcut = PendingKeymapShortcut(binding, event.key, context)
-                    return true
-                } else {
-                    pendingShortcut = null
-                    return false
-                }
-            }
-
-            KeyEventType.KeyUp -> {
-                val currentPending = pendingShortcut
-                if (currentPending != null) {
-                    if (event.key == currentPending.primaryKey) {
-                        pendingShortcut = null
-                        val handled = executor(currentPending.binding.actionId)
-                        if (handled) {
-                            logger.debug(
-                                LogCategory.UI,
-                                "Executed action on key release",
-                                mapOf("actionId" to currentPending.binding.actionId, "description" to currentPending.binding.description),
-                            )
-                        } else {
-                            logger.debug(
-                                LogCategory.UI,
-                                "Failed to execute action on key release",
-                                mapOf("actionId" to currentPending.binding.actionId),
-                            )
-                        }
-                        return handled
-                    } else if (event.key in MODIFIER_ONLY_KEYS) {
-                        // Releasing modifier alone cancels pending chord without invoking action
-                        pendingShortcut = null
-                        return false
-                    } else {
-                        pendingShortcut = null
-                        return false
-                    }
-                }
-                return false
-            }
-
-            else -> return false
+            KeyEventType.KeyDown -> handleKeyDown(event, context)
+            KeyEventType.KeyUp -> handleKeyUp(event, executor)
+            else -> false
         }
+
+    @Suppress("ReturnCount")
+    private fun handleKeyDown(
+        event: KeyEvent,
+        context: ShortcutContext,
+    ): Boolean {
+        if (event.key in MODIFIER_ONLY_KEYS) {
+            return false
+        }
+
+        // Check auto-repeat for the pending primary key
+        val currentPending = pendingShortcut
+        if (currentPending != null && currentPending.primaryKey == event.key) {
+            return true
+        }
+
+        // Match the event to a binding
+        val binding = matcher.match(event, context)
+        return if (binding != null) {
+            pendingShortcut = PendingKeymapShortcut(binding, event.key, context)
+            true
+        } else {
+            pendingShortcut = null
+            false
+        }
+    }
+
+    @Suppress("ReturnCount")
+    private fun handleKeyUp(
+        event: KeyEvent,
+        executor: (actionId: String) -> Boolean,
+    ): Boolean {
+        val currentPending = pendingShortcut ?: return false
+        pendingShortcut = null
+
+        if (event.key != currentPending.primaryKey) {
+            return false
+        }
+
+        val handled = executor(currentPending.binding.actionId)
+        val msg = if (handled) "Executed action on key release" else "Failed to execute action on key release"
+        val data =
+            if (handled) {
+                mapOf(
+                    "actionId" to currentPending.binding.actionId,
+                    "description" to currentPending.binding.description,
+                )
+            } else {
+                mapOf("actionId" to currentPending.binding.actionId)
+            }
+        logger.debug(LogCategory.UI, msg, data)
+        return handled
     }
 
     /**

@@ -95,38 +95,28 @@ fun Modifier.interceptKeyboardShortcuts(
             KeyEventType.KeyUp -> {
                 val currentPendingKey = pendingKey
                 val currentPendingBinding = pendingBinding
-                if (currentPendingKey != null && currentPendingBinding != null) {
-                    if (keyEvent.key == currentPendingKey) {
-                        pendingKey = null
-                        pendingBinding = null
-                        // Emit to KeyboardEventBus for action execution on primary key release
-                        coroutineScope.launch {
-                            KeyboardEventBus.emit(
-                                KeyboardEvent(
-                                    keyEvent = keyEvent,
-                                    source = source,
-                                    context = context,
-                                    sourceWindowId = windowId,
-                                ),
-                            )
-                        }
-                        true
-                    } else if (keyEvent.key in MODIFIER_ONLY_KEYS) {
-                        // Releasing modifier alone cancels pending shortcut
-                        pendingKey = null
-                        pendingBinding = null
-                        false
-                    } else {
-                        pendingKey = null
-                        pendingBinding = null
-                        false
+                pendingKey = null
+                pendingBinding = null
+                if (currentPendingKey != null && currentPendingBinding != null && keyEvent.key == currentPendingKey) {
+                    coroutineScope.launch {
+                        KeyboardEventBus.emit(
+                            KeyboardEvent(
+                                keyEvent = keyEvent,
+                                source = source,
+                                context = context,
+                                sourceWindowId = windowId,
+                            ),
+                        )
                     }
+                    true
                 } else {
                     false
                 }
             }
 
-            else -> false
+            else -> {
+                false
+            }
         }
     }
 }
