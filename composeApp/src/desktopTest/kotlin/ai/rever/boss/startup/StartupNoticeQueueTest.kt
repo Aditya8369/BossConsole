@@ -81,10 +81,10 @@ class StartupNoticeQueueTest {
     }
 
     @Test
-    fun `oversized unicode detail uses a concise logs remedy`() {
+    fun `long unicode detail preserves the leading remedy for visual ellipsis`() {
         assertEquals(
-            "Microkernel diagnostics need attention. Check service logs for details.",
-            renderKernelNotices(mapOf(STARTUP_NOTICE_SOURCE to "🚀".repeat(200))),
+            "Restart BOSS · " + "🚀".repeat(200),
+            renderKernelNotices(mapOf(STARTUP_NOTICE_SOURCE to "🚀".repeat(200), "auth" to "Restart BOSS")),
         )
     }
 }

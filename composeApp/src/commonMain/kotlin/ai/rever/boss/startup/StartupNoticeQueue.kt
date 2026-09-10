@@ -56,6 +56,5 @@ internal val kernelStartupNotices = StartupNoticeQueue()
 internal fun renderKernelNotices(batch: Map<String, String>): String {
     val repairs = batch.keys.count { it != STARTUP_NOTICE_SOURCE }
     if (repairs > 2) return "$repairs services need attention. Check service logs for details."
-    val text = batch.entries.sortedBy { it.key == STARTUP_NOTICE_SOURCE }.joinToString(" · ") { it.value }
-    return if (text.length > 300) "Microkernel diagnostics need attention. Check service logs for details." else text
+    return batch.entries.sortedBy { it.key == STARTUP_NOTICE_SOURCE }.joinToString(" · ") { it.value }
 }

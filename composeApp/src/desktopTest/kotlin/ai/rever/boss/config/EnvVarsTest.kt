@@ -75,6 +75,7 @@ class EnvVarsTest {
             posix?.setPermissions(privateMode)
             writeSavedBossMode(true, file)
             assertEquals("KERNEL", ConfigLoader.bossModeForNextLaunch(file, null, null))
+            assertEquals(runtime, ConfigLoader.getConfig("BOSS_MODE"))
             writeSavedBossMode(false, file)
             assertEquals("MONOLITH", ConfigLoader.bossModeForNextLaunch(file, null, null))
             assertEquals(runtime, ConfigLoader.getConfig("BOSS_MODE"))
@@ -96,5 +97,27 @@ class EnvVarsTest {
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `successful saves notify other settings surfaces and failures do not`() {
+        val dir =
+            kotlin.io.path
+                .createTempDirectory("mode-observers")
+                .toFile()
+        try {
+            val before = savedBossModeChanges.value
+            kotlin.test.assertTrue(saveBossMode(true, java.io.File(dir, "env_vars")).isSuccess)
+            assertEquals(before + 1, savedBossModeChanges.value)
+            kotlin.test.assertTrue(saveBossMode(false, dir).isFailure)
+            assertEquals(before + 1, savedBossModeChanges.value)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `build without kernel classes is unavailable`() {
+        kotlin.test.assertFalse(kernelModeAvailable(object : ClassLoader(null) {}))
     }
 }

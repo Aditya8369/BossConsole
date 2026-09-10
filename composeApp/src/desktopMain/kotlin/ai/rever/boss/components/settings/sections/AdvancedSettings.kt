@@ -30,16 +30,27 @@ fun AdvancedSettings() {
             ai.rever.boss.config
                 .bossModeOverrideSource()
         }
+    val modeAvailable =
+        remember {
+            ai.rever.boss.config
+                .kernelModeAvailable()
+        }
+    val modeRevision by ai.rever.boss.config.savedBossModeChanges
+        .collectAsState()
     var kernelMode by remember { mutableStateOf(false) }
     var needsRestart by remember { mutableStateOf(false) }
-    val initialMode = remember { mutableStateOf<Boolean?>(null) }
+    val initialMode =
+        remember {
+            ai.rever.boss.config.ConfigLoader
+                .getConfig("BOSS_MODE") == "KERNEL"
+        }
+    var modeSaveError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(modeRevision) {
         val mode = readBossMode()
+        modeSaveError = null
         kernelMode = mode
-        initialMode.value = ai.rever.boss.config.ConfigLoader
-            .getConfig("BOSS_MODE") == "KERNEL"
-        needsRestart = mode != initialMode.value
+        needsRestart = mode != initialMode
     }
 
     Column(
@@ -51,22 +62,29 @@ fun AdvancedSettings() {
                 label = "Microkernel Mode",
                 checked = kernelMode,
                 onCheckedChange = { enabled ->
+                    modeSaveError = null
                     coroutineScope.launch {
                         if (writeBossMode(enabled).isSuccess) {
                             kernelMode = enabled
-                            needsRestart = enabled != initialMode.value
+                            needsRestart = enabled != initialMode
                         } else {
-                            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
-                                "Could not save process mode. Check preference-file permissions and logs.",
-                            )
+                            modeSaveError = "Could not save process mode. Check preference-file permissions and logs."
                         }
                     }
                 },
-                enabled = modeOverride == null,
+                enabled = modeOverride == null && modeAvailable,
                 description =
-                    modeOverride?.let { "Controlled by $it" }
-                        ?: "Run plugins in isolated processes with gRPC IPC and AI self-healing",
+                    if (!modeAvailable) {
+                        "Microkernel mode is unavailable in this build."
+                    } else {
+                        modeOverride?.let { "Controlled by $it" }
+                            ?: "Run plugins in isolated processes with gRPC IPC and AI self-healing"
+                    },
             )
+
+            modeSaveError?.let { message ->
+                Text(text = message, color = androidx.compose.material.MaterialTheme.colors.error, fontSize = 11.sp)
+            }
 
             if (needsRestart) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -90,10 +108,10 @@ fun AdvancedSettings() {
         // Always shown, including with Microkernel Mode off: this is where source egress is turned
         // on, and an operator should be able to read and set it before enabling the mode that runs
         // it. The readiness card says when the mode is what's holding it back.
-        SelfHealingSettings(kernelMode = kernelMode)
+        SelfHealingSettings(kernelMode = kernelMode && modeAvailable)
 
         // Plugin JVM Settings (only visible in KERNEL mode)
-        if (kernelMode) {
+        if (kernelMode && modeAvailable) {
             val perfSettings by PerformanceSettingsManager.currentSettings.collectAsState()
             var pluginHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmHeapMb.toFloat()) }
             var pluginInitHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmInitialHeapMb.toFloat()) }
@@ -202,7 +220,7 @@ private suspend fun readBossMode(): Boolean =
     }
 
 private suspend fun writeBossMode(enabled: Boolean) =
-    withContext(Dispatchers.IO) {
+    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
         ai.rever.boss.config
             .saveBossMode(enabled)
     }

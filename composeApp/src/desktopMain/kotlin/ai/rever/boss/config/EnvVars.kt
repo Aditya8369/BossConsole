@@ -1,6 +1,12 @@
 package ai.rever.boss.config
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.Properties
+
+private val modeRevision = MutableStateFlow(0L)
+internal val savedBossModeChanges = modeRevision.asStateFlow()
 
 /** Parse the simple KEY=value format written by the process-mode menu. */
 internal fun parseEnvVars(lines: List<String>): Properties {
@@ -44,6 +50,7 @@ internal fun writeSavedBossMode(
             .createTempFile(file.absoluteFile.parentFile.toPath(), "env_vars-", ".part")
             .toFile()
     try {
+        partial.writeText(withSavedBossMode(lines, enabled).joinToString("\n", postfix = "\n"), Charsets.UTF_8)
         if (file.exists()) {
             val view =
                 java.nio.file.Files.getFileAttributeView(
@@ -55,13 +62,13 @@ internal fun writeSavedBossMode(
                     .setPosixFilePermissions(partial.toPath(), it)
             }
         }
-        partial.writeText(withSavedBossMode(lines, enabled).joinToString("\n", postfix = "\n"), Charsets.UTF_8)
         java.nio.file.Files.move(
             partial.toPath(),
             file.toPath(),
             java.nio.file.StandardCopyOption.ATOMIC_MOVE,
             java.nio.file.StandardCopyOption.REPLACE_EXISTING,
         )
+        modeRevision.update { it + 1 }
     } finally {
         partial.delete()
     }
@@ -98,3 +105,13 @@ internal fun saveBossMode(
         )
     }
 }
+
+internal fun kernelModeAvailable(classLoader: ClassLoader = ConfigLoader::class.java.classLoader): Boolean =
+    try {
+        Class.forName("ai.rever.boss.kernel.KernelBootstrap", false, classLoader)
+        true
+    } catch (_: ClassNotFoundException) {
+        false
+    } catch (_: LinkageError) {
+        false
+    }
