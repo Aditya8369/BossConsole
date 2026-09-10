@@ -33,4 +33,24 @@ class EnvVarsTest {
         assertEquals("KERNEL", parseEnvVars(enabled).getProperty("BOSS_MODE"))
         assertEquals(1, enabled.count { it == "BOSS_MODE=KERNEL" })
     }
+
+    @Test
+    fun `atomic writer preserves unrelated preferences and leaves no partial`() {
+        val dir =
+            kotlin.io.path
+                .createTempDirectory("saved-mode")
+                .toFile()
+        try {
+            val file = java.io.File(dir, "env_vars")
+            file.writeText("BOSS_MODE=KERNEL\nOTHER=keep\n")
+            writeSavedBossMode(false, file)
+            assertEquals("keep", parseEnvVars(file.readLines()).getProperty("OTHER"))
+            assertEquals(null, parseEnvVars(file.readLines()).getProperty("BOSS_MODE"))
+            writeSavedBossMode(true, file)
+            assertEquals("KERNEL", parseEnvVars(file.readLines()).getProperty("BOSS_MODE"))
+            assertEquals(listOf("env_vars"), dir.list()!!.toList())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

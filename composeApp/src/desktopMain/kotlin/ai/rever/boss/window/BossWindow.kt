@@ -518,8 +518,14 @@ fun ApplicationScope.BossWindow(
                                 .getConfig("BOSS_MODE")
                         mode.equals("KERNEL", ignoreCase = true)
                     }
+                val modeOverride =
+                    remember {
+                        ai.rever.boss.config
+                            .bossModeOverrideSource()
+                    }
                 CheckboxItem(
-                    "Microkernel Mode",
+                    if (modeOverride == null) "Microkernel Mode" else "Microkernel Mode (externally controlled)",
+                    enabled = modeOverride == null,
                     checked = isKernelMode,
                     onCheckedChange = {
                         // Toggle in env_vars file; requires restart

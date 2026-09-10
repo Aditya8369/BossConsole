@@ -41,46 +41,46 @@ class ConfigLoaderTest {
     @Test
     fun `env wins over all other tiers`() {
         assertEquals(
-            "from-env",
-            resolve(env = "from-env", sysProp = "x", envVars = "x", local = "x", embedded = "x", default = "x"),
+            "FROM-ENV",
+            resolve(env = "FROM-ENV", sysProp = "x", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
     @Test
     fun `system property wins below env`() {
         assertEquals(
-            "from-sysprop",
-            resolve(sysProp = "from-sysprop", envVars = "x", local = "x", embedded = "x", default = "x"),
+            "FROM-SYSPROP",
+            resolve(sysProp = "FROM-SYSPROP", envVars = "x", local = "x", embedded = "x", default = "x"),
         )
     }
 
     @Test
     fun `envVars properties win below system property`() {
         assertEquals(
-            "from-envvars",
-            resolve(envVars = "from-envvars", local = "x", embedded = "x", default = "x"),
+            "FROM-ENVVARS",
+            resolve(envVars = "FROM-ENVVARS", local = "x", embedded = "x", default = "x"),
         )
     }
 
     @Test
     fun `local properties win below envVars properties`() {
         assertEquals(
-            "from-local",
-            resolve(local = "from-local", embedded = "x", default = "x"),
+            "FROM-LOCAL",
+            resolve(local = "FROM-LOCAL", embedded = "x", default = "x"),
         )
     }
 
     @Test
     fun `embedded build config wins below local properties`() {
         assertEquals(
-            "from-embedded",
-            resolve(embedded = "from-embedded", default = "x"),
+            "FROM-EMBEDDED",
+            resolve(embedded = "FROM-EMBEDDED", default = "x"),
         )
     }
 
     @Test
     fun `default is used when no source has the key`() {
-        assertEquals("from-default", resolve(default = "from-default"))
+        assertEquals("FROM-DEFAULT", resolve(default = "FROM-DEFAULT"))
     }
 
     @Test
@@ -188,5 +188,23 @@ class ConfigLoaderTest {
                 embeddedProps = Properties().apply { setProperty("SUPABASE_URL", "embedded") },
             ),
         )
+    }
+
+    @Test
+    fun `kernel mode is canonical for lowercase env and blank env with saved mode`() {
+        for (env in listOf(" kernel ", "")) {
+            assertEquals(
+                "KERNEL",
+                ConfigLoader.resolve(
+                    key = "BOSS_MODE",
+                    defaultValue = null,
+                    envValue = env,
+                    sysPropValue = null,
+                    envVarsProps = Properties().apply { setProperty("BOSS_MODE", "kernel") },
+                    localProps = Properties(),
+                    embeddedProps = Properties(),
+                ),
+            )
+        }
     }
 }
