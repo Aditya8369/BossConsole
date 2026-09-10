@@ -26,6 +26,7 @@ import ai.rever.boss.components.window_panel.components.main_window_panels.remem
 import ai.rever.boss.components.window_panel.components.main_window_panels.rememberTabGroupExpansion
 import ai.rever.boss.components.window_panel.components.main_window_panels.rememberToggleCollapseAction
 import ai.rever.boss.components.window_panel.components.main_window_panels.rememberWindowTabGroups
+import ai.rever.boss.html.HtmlFileOpenQueue
 import ai.rever.boss.icons.FileIcons
 import ai.rever.boss.platform.bossFileDropTarget
 import ai.rever.boss.plugin.api.Panel
@@ -221,6 +222,7 @@ class SplitViewState(
      * Compose state.
      */
     private val openScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    internal val htmlFileOpens = HtmlFileOpenQueue()
 
     /**
      * Cancels the deferred opens. Called when this state leaves the composition.
@@ -233,6 +235,7 @@ class SplitViewState(
      */
     internal fun dispose() {
         openScope.cancel()
+        htmlFileOpens.close()
     }
 
     /**
@@ -540,6 +543,11 @@ class SplitViewState(
             return ext in BROWSER_FILE_EXTENSIONS
         }
 
+        fun isHtmlFile(fileName: String): Boolean {
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            return ext == "html" || ext == "htm"
+        }
+
         fun toFileUrl(filePath: String): String =
             java.io
                 .File(filePath)
@@ -547,13 +555,29 @@ class SplitViewState(
                 .toString()
     }
 
+    @Suppress("ReturnCount")
     fun openFileInActivePanel(
         filePath: String,
         fileName: String,
+        line: Int = 0,
     ) {
+        // A source location (search result / go-to-definition) is explicit editor intent.
+        if (line > 0) {
+            openFileInEditorTab(filePath, fileName)
+            return
+        }
+
         // Route browser-renderable files (images, PDFs) to the browser tab
         if (shouldOpenInBrowser(fileName)) {
             openUrlInActivePanel(toFileUrl(filePath), fileName)
+            return
+        }
+
+        // Route .html / .htm files based on user preference
+        if (isHtmlFile(fileName)) {
+            openScope.launch {
+                htmlFileOpens.enqueue(filePath, fileName)
+            }
             return
         }
 
@@ -568,6 +592,17 @@ class SplitViewState(
         }
 
         openFileInEditorTab(filePath, fileName)
+    }
+
+    /**
+     * Force-open a file in a browser tab, bypassing smart file routing.
+     * Used by "Open With > Browser" context menu action / explicit override.
+     */
+    fun openFileInBrowserTab(
+        filePath: String,
+        fileName: String,
+    ) {
+        openUrlInActivePanel(toFileUrl(filePath), fileName)
     }
 
     /**
@@ -1812,6 +1847,17 @@ class SplitViewState(
         }
     }
 
+    /**
+     * Lists all open tabs in this window's current and preserved workspaces.
+     *
+     * "Active" means running, not selected or visible. Search, Top of Mind, background-tab
+     * metadata lookup and pop-out return all need unselected tabs to remain discoverable.
+     * This inventory is not a visibility signal for browser hibernation.
+     *
+     * Panel IDs are scoped to their workspace and can repeat across workspaces. [selectTabInPanel]
+     * resolves against the current tree only; a preserved tab's panel ID must not be used there
+     * without first restoring its workspace.
+     */
     fun collectAllActiveTabs(
         workspaceManager: ai.rever.boss.components.workspaces.WorkspaceManager? = null,
         windowId: String = "unknown",

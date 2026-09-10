@@ -103,6 +103,14 @@ class GlobalSearchNewSourcesTest {
     // --- tools ---------------------------------------------------------------------------------
 
     @Test
+    fun `typed case changes tool ranking without changing matches`() {
+        registerTools(tool("one", "Boss"), tool("two", "boss"))
+
+        assertEquals(listOf("one", "two"), resultsOf<SearchResult.ToolResult>("Boss").map { it.panelId })
+        assertEquals(listOf("two", "one"), resultsOf<SearchResult.ToolResult>("boss").map { it.panelId })
+    }
+
+    @Test
     fun `a tool is found by its label`() {
         registerTools(tool("bookmarks", "Bookmarks"))
 
@@ -275,6 +283,19 @@ class GlobalSearchNewSourcesTest {
     // --- MCP tools -----------------------------------------------------------------------------
 
     @Test
+    fun `description fallback retains typed case and case insensitive eligibility`() {
+        SearchSources.registerMcpTools {
+            listOf(
+                McpToolSearchRecord("one", "test", "Boss", enabled = true),
+                McpToolSearchRecord("two", "test", "boss", enabled = true),
+            )
+        }
+
+        assertEquals(listOf("one", "two"), resultsOf<SearchResult.McpToolResult>("Boss").map { it.name })
+        assertEquals(listOf("two", "one"), resultsOf<SearchResult.McpToolResult>("boss").map { it.name })
+    }
+
+    @Test
     fun `an MCP tool is found by name and reports whether it is switched off`() {
         SearchSources.registerMcpTools {
             listOf(
@@ -303,7 +324,7 @@ class GlobalSearchNewSourcesTest {
     @Test
     fun `a short query does not match every tool by its description`() {
         // FuzzyMatcher accepts any in-order subsequence, so "abc" hits almost any paragraph. Those
-        // rows still drew an "MCP Tools" section header full of rows that cannot be activated. A
+        // rows still drew an "MCP Tools" section header full of irrelevant rows. A
         // score floor could not fix it - word-boundary and start-of-string bonuses push scattered
         // initials on prose into the sixties - so a description hit has to CONTAIN what was typed.
         SearchSources.registerMcpTools {
