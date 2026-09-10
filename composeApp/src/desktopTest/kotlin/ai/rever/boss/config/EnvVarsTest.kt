@@ -71,7 +71,7 @@ class EnvVarsTest {
                 )
             val privateMode =
                 java.nio.file.attribute.PosixFilePermissions
-                    .fromString("rw-------")
+                    .fromString("r--------")
             posix?.setPermissions(privateMode)
             writeSavedBossMode(true, file)
             assertEquals("KERNEL", ConfigLoader.bossModeForNextLaunch(file, null, null))

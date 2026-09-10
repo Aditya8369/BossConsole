@@ -30,11 +30,8 @@ fun AdvancedSettings() {
             ai.rever.boss.config
                 .bossModeOverrideSource()
         }
-    val modeAvailable =
-        remember {
-            ai.rever.boss.config
-                .kernelModeAvailable()
-        }
+    var modeAvailable by remember { mutableStateOf(false) }
+    var modeLoaded by remember { mutableStateOf(false) }
     val modeRevision by ai.rever.boss.config.savedBossModeChanges
         .collectAsState()
     var kernelMode by remember { mutableStateOf(false) }
@@ -48,7 +45,12 @@ fun AdvancedSettings() {
 
     LaunchedEffect(modeRevision) {
         val mode = readBossMode()
-        modeSaveError = null
+        modeAvailable =
+            withContext(Dispatchers.IO) {
+                ai.rever.boss.config
+                    .kernelModeAvailable()
+            }
+        modeLoaded = true
         kernelMode = mode
         needsRestart = mode != initialMode
     }
@@ -69,21 +71,19 @@ fun AdvancedSettings() {
                         }
                     }
                 },
-                enabled = modeOverride == null && modeAvailable,
-                description =
-                    if (!modeAvailable) {
-                        "Microkernel mode is unavailable in this build."
-                    } else {
-                        modeOverride?.let { "Controlled by $it" }
-                            ?: "Run plugins in isolated processes with gRPC IPC and AI self-healing"
-                    },
+                enabled = modeLoaded && modeOverride == null && modeAvailable,
+                description = processModeDescription(modeLoaded, modeAvailable, modeOverride),
             )
 
             modeSaveError?.let { message ->
-                Text(text = message, color = androidx.compose.material.MaterialTheme.colors.error, fontSize = 11.sp)
+                Text(
+                    text = message,
+                    color = ai.rever.boss.plugin.ui.BossTheme.colors.alert,
+                    fontSize = 11.sp,
+                )
             }
 
-            if (needsRestart) {
+            if (needsRestart && modeAvailable) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -105,10 +105,10 @@ fun AdvancedSettings() {
         // Always shown, including with Microkernel Mode off: this is where source egress is turned
         // on, and an operator should be able to read and set it before enabling the mode that runs
         // it. The readiness card says when the mode is what's holding it back.
-        SelfHealingSettings(kernelMode = kernelMode && modeAvailable)
+        if (modeLoaded) SelfHealingSettings(kernelMode = initialMode && modeAvailable)
 
         // Plugin JVM Settings (only visible in KERNEL mode)
-        if (kernelMode && modeAvailable) {
+        if (modeLoaded && initialMode && modeAvailable) {
             val perfSettings by PerformanceSettingsManager.currentSettings.collectAsState()
             var pluginHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmHeapMb.toFloat()) }
             var pluginInitHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmInitialHeapMb.toFloat()) }
@@ -220,4 +220,16 @@ private suspend fun writeBossMode(enabled: Boolean) =
     withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
         ai.rever.boss.config
             .saveBossMode(enabled)
+    }
+
+private fun processModeDescription(
+    loaded: Boolean,
+    available: Boolean,
+    overrideSource: String?,
+): String =
+    when {
+        !loaded -> "Loading process mode…"
+        !available -> "Microkernel mode is unavailable in this build."
+        overrideSource != null -> "Controlled by $overrideSource"
+        else -> "Run plugins in isolated processes with gRPC IPC and AI self-healing"
     }
