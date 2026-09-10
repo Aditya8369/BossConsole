@@ -277,6 +277,19 @@ actual object DeepLinkHandler {
                         _deepLinkFlow.value = uri
                     }
                 }
+            } catch (e: UnsupportedOperationException) {
+                // Documented outcome on Linux: the JDK's X11 Desktop peer supports no
+                // APP_OPEN_URI action (see processCommandLineArgs's KDoc), so this always
+                // throws there. Not an error - argv already delivers these links, both at
+                // cold start and forwarded to a running instance over the single-instance
+                // channel - but logging it at ERROR read as a broken feature on every Linux
+                // launch (BossConsole#410). Same pattern setupOpenFileHandler already uses
+                // for the equivalent APP_OPEN_FILE gap.
+                logger.debug(
+                    LogCategory.SYSTEM,
+                    "Desktop.setOpenURIHandler not supported on this platform",
+                    mapOf("reason" to (e.message ?: "unsupported")),
+                )
             } catch (e: Exception) {
                 logger.error(LogCategory.SYSTEM, "Failed to set up deep link handler", error = e)
             }
