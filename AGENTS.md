@@ -833,6 +833,15 @@ Linux) or a loopback port (Windows). Every request must present the token,
 "another instance is running" means something answered on the channel rather than
 a pid existing, and a descriptor nobody answers on is reclaimed.
 
+A forwarded plugin action (`boss://plugin?id=...&action=...`) is acknowledged
+only when its handler reports true. Missing ids, missing handlers, declined
+and throwing handlers report failure. The channel waits up to five seconds;
+a timeout reports an unknown outcome and cancels dispatch if it is still queued.
+An already-running synchronous handler cannot be interrupted. Startup therefore
+never retries plugin actions automatically, even after a lost response; auth and
+other open requests retain their existing retries. Panel-open links still only
+acknowledge queuing. The wire verdict does not change OS/CLI callers that ignore it.
+
 ## Every OS open request becomes a `boss://` link
 
 Links and files arrive through four different doors and all four normalise to one
