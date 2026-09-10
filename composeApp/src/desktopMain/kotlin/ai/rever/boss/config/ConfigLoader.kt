@@ -1,5 +1,6 @@
 package ai.rever.boss.config
 
+import ai.rever.boss.plugin.pathutils.BossDirectories
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
 import java.io.File
@@ -14,7 +15,8 @@ object ConfigLoader {
     private val properties = Properties()
 
     /**
-     * Config loaded from ~/.boss/env_vars file (managed by UI settings).
+     * Only BOSS_MODE is imported from the UI-managed env_vars file.
+     * Other settings retain their established config precedence.
      */
     private val envVarsProperties = Properties()
 
@@ -36,12 +38,12 @@ object ConfigLoader {
     /**
      * Loads properties from ~/.boss/env_vars file if it exists.
      */
-    fun loadEnvVarsProperties() {
+    private fun loadEnvVarsProperties() {
         try {
             envVarsProperties.clear()
-            val envFile = resolveEnvVarsFile()
-            if (envFile != null && envFile.exists()) {
-                parseEnvVars(envFile)
+            val envFile = BossDirectories.resolve("env_vars")
+            if (envFile.exists()) {
+                envVarsProperties.putAll(parseEnvVars(envFile))
                 logger.debug(
                     LogCategory.SYSTEM,
                     "Loaded properties from env_vars",
@@ -53,29 +55,18 @@ object ConfigLoader {
         }
     }
 
-    private fun parseEnvVars(file: File) {
+    internal fun parseEnvVars(file: File): Properties {
+        val result = Properties()
         for (line in file.readLines(Charsets.UTF_8)) {
             val trimmed = line.trim()
             if (trimmed.isBlank() || trimmed.startsWith("#")) continue
             val parts = trimmed.split("=", limit = 2)
-            if (parts.size == 2 && parts[0].isNotBlank()) {
-                envVarsProperties.setProperty(parts[0].trim(), parts[1].trim())
+            if (parts.size == 2 && parts[0].trim() == "BOSS_MODE") {
+                result.setProperty("BOSS_MODE", parts[1].trim())
             }
         }
+        return result
     }
-
-    private fun resolveEnvVarsFile(): File? =
-        try {
-            val dirsCls = Class.forName("ai.rever.boss.plugin.pathutils.BossDirectories")
-            val dirsInst = dirsCls.getDeclaredField("INSTANCE").get(null)
-            dirsCls.getMethod("resolve", String::class.java).invoke(dirsInst, "env_vars") as? File
-        } catch (_: ReflectiveOperationException) {
-            val bossDataDir = System.getenv("BOSS_DATA_DIR") ?: "${System.getProperty("user.home")}/.boss"
-            File(bossDataDir, "env_vars")
-        } catch (_: SecurityException) {
-            val bossDataDir = System.getenv("BOSS_DATA_DIR") ?: "${System.getProperty("user.home")}/.boss"
-            File(bossDataDir, "env_vars")
-        }
 
     /**
      * Loads properties from local.properties file if it exists.
@@ -141,7 +132,7 @@ object ConfigLoader {
      * 1. System environment variable
      * 2. System property
      * 3. local.properties file
-     * 4. ~/.boss/env_vars file
+     * 4. UI-managed env_vars file (BOSS_MODE only)
      * 5. Embedded build config (baked in at build time from CI secrets)
      * 6. Default value
      */

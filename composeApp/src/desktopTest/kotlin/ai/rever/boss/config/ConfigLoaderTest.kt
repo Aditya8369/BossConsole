@@ -169,4 +169,35 @@ class ConfigLoaderTest {
             ),
         )
     }
+
+    @Test
+    fun `saved mode parser excludes unrelated configuration and honors the last assignment`() {
+        val file =
+            kotlin.io.path
+                .createTempFile("saved-mode-", ".env")
+                .toFile()
+        try {
+            file.writeText(
+                "SUPABASE_URL=https://example.invalid\n" +
+                    "SUPABASE_ANON_KEY=unrelated\nBOSS_MODE_EXTRA=keep\n" +
+                    "BOSS_MODE=MONOLITH\n  # BOSS_MODE=MONOLITH\nBOSS_MODE=KERNEL\n",
+            )
+            val parsed = ConfigLoader.parseEnvVars(file)
+            assertEquals(setOf("BOSS_MODE"), parsed.stringPropertyNames())
+            assertEquals("KERNEL", parsed.getProperty("BOSS_MODE"))
+            assertEquals(
+                "embedded",
+                ConfigLoader.resolve(
+                    "SUPABASE_URL",
+                    null,
+                    null,
+                    null,
+                    parsed,
+                    Properties().apply { setProperty("SUPABASE_URL", "embedded") },
+                ),
+            )
+        } finally {
+            file.delete()
+        }
+    }
 }

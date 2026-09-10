@@ -1149,23 +1149,10 @@ actual object GitService {
             false
         }
 
-    private suspend fun isGitRepo(projectPath: String): Boolean {
-        val dir = File(projectPath)
-        if (File(dir, ".git").exists()) {
-            return true
-        }
-        return try {
-            val result = runGitCommand(projectPath, "rev-parse", "--show-toplevel")
-            if (result.exitCode == 0) {
-                val topLevel = File(result.output.trim())
-                try {
-                    topLevel.canonicalPath.equals(dir.canonicalPath, ignoreCase = true)
-                } catch (_: Exception) {
-                    topLevel.absolutePath.equals(dir.absolutePath, ignoreCase = true)
-                }
-            } else {
-                false
-            }
+    private suspend fun isGitRepo(projectPath: String): Boolean =
+        try {
+            val result = runGitCommand(projectPath, "rev-parse", "--is-inside-work-tree")
+            result.exitCode == 0 && result.output.trim() == "true"
         } catch (e: Exception) {
             logger.debug(
                 LogCategory.SYSTEM,
@@ -1174,7 +1161,6 @@ actual object GitService {
             )
             false
         }
-    }
 
     private suspend fun getCurrentBranchName(projectPath: String): String? {
         return try {
@@ -1761,7 +1747,6 @@ actual object GitService {
             if (windowGitState == null) return@withContext emptyList()
 
             val projectPath = windowGitState.projectPath.value ?: return@withContext emptyList()
-            if (!isGitRepo(projectPath)) return@withContext emptyList()
 
             try {
                 // --untracked-files=all, not git's default: the default
@@ -1797,7 +1782,6 @@ actual object GitService {
             if (windowGitState == null) return@withContext emptyList()
 
             val projectPath = windowGitState.projectPath.value ?: return@withContext emptyList()
-            if (!isGitRepo(projectPath)) return@withContext emptyList()
 
             try {
                 val format = "%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%P%x00%D"

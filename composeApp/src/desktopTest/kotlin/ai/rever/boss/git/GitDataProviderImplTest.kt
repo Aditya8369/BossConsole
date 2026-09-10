@@ -106,6 +106,18 @@ class GitDataProviderImplTest {
         }
 
     @Test
+    fun refreshStatusAcceptsAProjectInsideARepository() =
+        runGitTest {
+            val repo = dirtyRepo()
+            val subproject = File(repo, "subproject").also { it.mkdirs() }
+            val state = WindowGitState("test-window")
+            val provider = provider(state, "test-window") { subproject.absolutePath }
+            provider.refreshStatus()
+            assertTrue(state.isGitRepository.value, "a repository subdirectory is still a valid Git work tree")
+            assertNotNull(state.currentBranch.value)
+        }
+
+    @Test
     fun refreshStatusAlignsGitsProjectPathSoFileDiffsResolve() =
         runGitTest {
             val repo = dirtyRepo()
