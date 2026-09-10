@@ -1156,12 +1156,15 @@ actual object GitService {
         }
         return try {
             val result = runGitCommand(projectPath, "rev-parse", "--show-toplevel")
-            if (result.exitCode != 0) return false
-            val topLevel = File(result.output.trim())
-            try {
-                topLevel.canonicalPath.equals(dir.canonicalPath, ignoreCase = true)
-            } catch (_: Exception) {
-                topLevel.absolutePath.equals(dir.absolutePath, ignoreCase = true)
+            if (result.exitCode == 0) {
+                val topLevel = File(result.output.trim())
+                try {
+                    topLevel.canonicalPath.equals(dir.canonicalPath, ignoreCase = true)
+                } catch (_: Exception) {
+                    topLevel.absolutePath.equals(dir.absolutePath, ignoreCase = true)
+                }
+            } else {
+                false
             }
         } catch (e: Exception) {
             logger.debug(

@@ -4,7 +4,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
-import java.io.IOException
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -70,19 +69,18 @@ class DesktopFileScannerTest {
         File(real, "file.txt").writeText("hi")
         val linkDir = tempDir()
         val link = File(linkDir, "link")
+        var symlinkCreated = false
         try {
             Files.createSymbolicLink(link.toPath(), real.toPath())
-        } catch (e: IOException) {
+            symlinkCreated = true
+        } catch (e: java.io.IOException) {
             assumeTrue(false, "Could not create a symlink (Windows needs privileges): ${e.message}")
-            return
         } catch (e: UnsupportedOperationException) {
             assumeTrue(false, "Could not create a symlink: ${e.message}")
-            return
         } catch (e: SecurityException) {
             assumeTrue(false, "Could not create a symlink: ${e.message}")
-            return
         }
-        if (!Files.isSymbolicLink(link.toPath())) return
+        if (!symlinkCreated || !Files.isSymbolicLink(link.toPath())) return
         assertTrue(directoryHasChildren(link.absolutePath))
     }
 
