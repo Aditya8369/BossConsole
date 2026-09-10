@@ -31,7 +31,7 @@ class KeymapHandler(
     settings: KeymapSettings,
 ) {
     private val logger = BossLogger.forComponent("KeymapHandler")
-    private val matcher = KeymapMatcher(settings)
+    private var matcher = KeymapMatcher(settings)
     private var _settings = settings
 
     /**
@@ -45,6 +45,7 @@ class KeymapHandler(
      */
     fun updateSettings(newSettings: KeymapSettings) {
         _settings = newSettings
+        matcher = KeymapMatcher(newSettings)
     }
 
     /**

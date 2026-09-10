@@ -5,12 +5,17 @@ import ai.rever.boss.keymap.handler.MapBasedActionExecutor
 import ai.rever.boss.keymap.model.KeyBinding
 import ai.rever.boss.keymap.model.KeymapSettings
 import ai.rever.boss.keymap.model.ShortcutContext
+import ai.rever.boss.utils.SystemUtils
+import androidx.compose.ui.input.key.KeyEvent
 import org.junit.jupiter.api.Test
+import java.awt.Canvas
+import java.awt.event.InputEvent
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import java.awt.event.KeyEvent as AwtKeyEvent
 
 /**
  * Tests for KeymapHandler component.
@@ -166,6 +171,76 @@ class KeymapHandlerTest {
 
         assertFalse(handler.isBound("action1"))
         assertTrue(handler.isBound("action2"))
+    }
+
+    private fun testEvent(
+        keyCode: Int,
+        keyChar: Char,
+    ): KeyEvent {
+        val mod =
+            if (SystemUtils.isMacOS) {
+                InputEvent.META_DOWN_MASK
+            } else {
+                InputEvent.CTRL_DOWN_MASK
+            }
+        val awtEvent =
+            AwtKeyEvent(
+                Canvas(),
+                AwtKeyEvent.KEY_PRESSED,
+                System.currentTimeMillis(),
+                mod,
+                keyCode,
+                keyChar,
+            )
+        return KeyEvent(awtEvent)
+    }
+
+    @Test
+    fun `updateSettings updates key matching and event execution`() {
+        val binding1 = KeyBinding("action1", "N", listOf("Cmd"))
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding1)))
+
+        val eventN = testEvent(AwtKeyEvent.VK_N, 'N')
+        val eventT = testEvent(AwtKeyEvent.VK_T, 'T')
+
+        var executed: String? = null
+        val handledNBefore =
+            handler.handleKeyEvent(eventN, ShortcutContext.GLOBAL) {
+                executed = it
+                true
+            }
+        assertTrue(handledNBefore)
+        assertEquals("action1", executed)
+
+        val handledTBefore =
+            handler.handleKeyEvent(eventT, ShortcutContext.GLOBAL) {
+                true
+            }
+        assertFalse(handledTBefore)
+
+        val binding2 = KeyBinding("action2", "T", listOf("Cmd"))
+        handler.updateSettings(KeymapSettings.fromBindings(listOf(binding2)))
+
+        executed = null
+        val handledNAfter =
+            handler.handleKeyEvent(eventN, ShortcutContext.GLOBAL) {
+                executed = it
+                true
+            }
+        assertFalse(handledNAfter)
+        assertNull(executed)
+
+        val handledTAfter =
+            handler.handleKeyEvent(eventT, ShortcutContext.GLOBAL) {
+                executed = it
+                true
+            }
+        assertTrue(handledTAfter)
+        assertEquals("action2", executed)
+        assertEquals(
+            "action2",
+            handler.getMatchingBindings(eventT, ShortcutContext.GLOBAL).firstOrNull()?.actionId,
+        )
     }
 
     @Test
