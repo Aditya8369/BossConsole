@@ -135,6 +135,24 @@ object ConfigLoader {
             embeddedProps = embeddedProperties,
         )
 
+    /** Resolve preferences for the next launch without mutating the running kernel's snapshot. */
+    internal fun bossModeForNextLaunch(
+        file: File =
+            ai.rever.boss.plugin.pathutils.BossDirectories
+                .resolve("env_vars"),
+        envValue: String? = System.getenv("BOSS_MODE"),
+        sysPropValue: String? = System.getProperty("BOSS_MODE"),
+    ): String? {
+        val saved =
+            runCatching {
+                if (file.isFile) parseEnvVars(file.readLines(Charsets.UTF_8)) else Properties()
+            }.getOrElse { error ->
+                logger.warn(LogCategory.SYSTEM, "Could not read saved process mode", error = error)
+                envVarsProperties
+            }
+        return resolve("BOSS_MODE", null, envValue, sysPropValue, saved, properties, embeddedProperties)
+    }
+
     /**
      * The precedence contract as a pure function, separated from the process
      * environment so tests can pin every tier (see ConfigLoaderTest).

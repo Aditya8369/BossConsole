@@ -14,6 +14,9 @@ class StartupKernelOrderingTest {
         val plugin =
             File(root, "composeApp/src/commonMain/kotlin/ai/rever/boss/components/plugin/DefaultPlugin.kt").readText()
         assertTrue(!plugin.contains("System.getenv(\"BOSS_MODE\")"), "Plugin gates must use ConfigLoader precedence")
+        val store =
+            File(root, "composeApp/src/desktopMain/kotlin/ai/rever/boss/plugin/PluginStoreSetup.kt").readText()
+        assertTrue(!store.contains("System.getenv(\"BOSS_MODE\")"), "Store fallback must use ConfigLoader precedence")
         val lock = main.indexOf("if (!SingleInstanceManager.acquireLock())")
         val kernel = main.indexOf("getMethod(\"initialize\")")
         assertTrue(lock >= 0 && kernel > lock)

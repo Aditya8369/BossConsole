@@ -868,7 +868,7 @@ class KernelBootstrap(
         val summary = serviceStartupSummary(spawnedCount, missingJars, failedSpawns)
         logger.info(summary)
         ai.rever.boss.startup.kernelStartupNotices
-            .report(summary, source = "startup")
+            .report(summary, source = ai.rever.boss.startup.STARTUP_NOTICE_SOURCE)
     }
 
     /**

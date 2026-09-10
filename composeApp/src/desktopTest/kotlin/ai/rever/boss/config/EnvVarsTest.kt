@@ -27,7 +27,7 @@ class EnvVarsTest {
     fun `writer round trips duplicate and tab indented keys without damaging other keys`() {
         val lines = listOf("BOSS_MODE=KERNEL", "\tBOSS_MODE = KERNEL", "BOSS_MODE_EXTRA=keep", "# BOSS_MODE=KERNEL")
         val disabled = withSavedBossMode(lines, false)
-        assertEquals(null, parseEnvVars(disabled).getProperty("BOSS_MODE"))
+        assertEquals("MONOLITH", parseEnvVars(disabled).getProperty("BOSS_MODE"))
         assertEquals("keep", parseEnvVars(disabled).getProperty("BOSS_MODE_EXTRA"))
         val enabled = withSavedBossMode(disabled, true)
         assertEquals("KERNEL", parseEnvVars(enabled).getProperty("BOSS_MODE"))
@@ -45,10 +45,54 @@ class EnvVarsTest {
             file.writeText("BOSS_MODE=KERNEL\nOTHER=keep\n")
             writeSavedBossMode(false, file)
             assertEquals("keep", parseEnvVars(file.readLines()).getProperty("OTHER"))
-            assertEquals(null, parseEnvVars(file.readLines()).getProperty("BOSS_MODE"))
+            assertEquals("MONOLITH", parseEnvVars(file.readLines()).getProperty("BOSS_MODE"))
             writeSavedBossMode(true, file)
             assertEquals("KERNEL", parseEnvVars(file.readLines()).getProperty("BOSS_MODE"))
             assertEquals(listOf("env_vars"), dir.list()!!.toList())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `saved mode rereads writes without changing runtime snapshot and preserves permissions`() {
+        val dir =
+            kotlin.io.path
+                .createTempDirectory("mode-reread")
+                .toFile()
+        try {
+            val file = java.io.File(dir, "env_vars")
+            file.writeText("BOSS_MODE=MONOLITH\n")
+            val runtime = ConfigLoader.getConfig("BOSS_MODE")
+            val posix =
+                java.nio.file.Files.getFileAttributeView(
+                    file.toPath(),
+                    java.nio.file.attribute.PosixFileAttributeView::class.java,
+                )
+            val privateMode =
+                java.nio.file.attribute.PosixFilePermissions
+                    .fromString("rw-------")
+            posix?.setPermissions(privateMode)
+            writeSavedBossMode(true, file)
+            assertEquals("KERNEL", ConfigLoader.bossModeForNextLaunch(file, null, null))
+            writeSavedBossMode(false, file)
+            assertEquals("MONOLITH", ConfigLoader.bossModeForNextLaunch(file, null, null))
+            assertEquals(runtime, ConfigLoader.getConfig("BOSS_MODE"))
+            if (posix != null) assertEquals(privateMode, posix.readAttributes().permissions())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `save failure is a result and preserves the original destination`() {
+        val dir =
+            kotlin.io.path
+                .createTempDirectory("mode-write-failure")
+                .toFile()
+        try {
+            kotlin.test.assertTrue(saveBossMode(true, dir).isFailure)
+            kotlin.test.assertTrue(dir.isDirectory)
         } finally {
             dir.deleteRecursively()
         }

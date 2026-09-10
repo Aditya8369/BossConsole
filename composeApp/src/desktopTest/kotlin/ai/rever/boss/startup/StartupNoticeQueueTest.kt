@@ -69,7 +69,7 @@ class StartupNoticeQueueTest {
     fun `operator remedies precede startup information`() =
         runTest {
             val queue = StartupNoticeQueue()
-            queue.report("startup summary", "startup")
+            queue.report("startup summary", STARTUP_NOTICE_SOURCE)
             queue.report("restart BOSS", "auth")
             assertEquals("restart BOSS · startup summary", queue.notices.first())
         }
@@ -78,5 +78,13 @@ class StartupNoticeQueueTest {
     fun `large failure batches display an actionable count`() {
         val batch = (1..8).associate { "service-$it" to "repeated lengthy failure" }
         assertEquals("8 services need attention. Check service logs for details.", renderKernelNotices(batch))
+    }
+
+    @Test
+    fun `oversized unicode detail uses a concise logs remedy`() {
+        assertEquals(
+            "Microkernel diagnostics need attention. Check service logs for details.",
+            renderKernelNotices(mapOf(STARTUP_NOTICE_SOURCE to "🚀".repeat(200))),
+        )
     }
 }

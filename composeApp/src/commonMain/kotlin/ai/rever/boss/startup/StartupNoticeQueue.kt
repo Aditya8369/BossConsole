@@ -11,6 +11,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+internal const val STARTUP_NOTICE_SOURCE = "kernel-startup-summary"
 internal const val KERNEL_NOTICE_DURATION_MS = 12_000L
 
 /** Retain latest diagnostics per source. Cancellation favors at-least-once delivery over loss. */
@@ -51,10 +52,10 @@ internal class StartupNoticeQueue {
 
 internal val kernelStartupNotices = StartupNoticeQueue()
 
-/** Status-bar space is finite; full per-service details are already in the kernel log. */
+/** Large batches intentionally summarize all details, including startup, in the kernel log. */
 internal fun renderKernelNotices(batch: Map<String, String>): String {
-    val repairs = batch.keys.count { it != "startup" }
+    val repairs = batch.keys.count { it != STARTUP_NOTICE_SOURCE }
     if (repairs > 2) return "$repairs services need attention. Check service logs for details."
-    val text = batch.entries.sortedBy { it.key == "startup" }.joinToString(" · ") { it.value }
-    return if (text.length > 300) text.take(220) + "… See service logs for details." else text
+    val text = batch.entries.sortedBy { it.key == STARTUP_NOTICE_SOURCE }.joinToString(" · ") { it.value }
+    return if (text.length > 300) "Microkernel diagnostics need attention. Check service logs for details." else text
 }

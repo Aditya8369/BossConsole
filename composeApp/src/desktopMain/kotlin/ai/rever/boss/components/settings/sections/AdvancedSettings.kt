@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
 fun AdvancedSettings() {
     val coroutineScope = rememberCoroutineScope()
 
-    // Show the same effective mode as startup; externally owned settings cannot be changed here.
+    // Show the next-launch choice while retaining the running mode for the restart indicator.
     val modeOverride =
         remember {
             ai.rever.boss.config
@@ -37,7 +37,9 @@ fun AdvancedSettings() {
     LaunchedEffect(Unit) {
         val mode = readBossMode()
         kernelMode = mode
-        initialMode.value = mode
+        initialMode.value = ai.rever.boss.config.ConfigLoader
+            .getConfig("BOSS_MODE") == "KERNEL"
+        needsRestart = mode != initialMode.value
     }
 
     Column(
@@ -49,10 +51,15 @@ fun AdvancedSettings() {
                 label = "Microkernel Mode",
                 checked = kernelMode,
                 onCheckedChange = { enabled ->
-                    kernelMode = enabled
-                    needsRestart = enabled != initialMode.value
                     coroutineScope.launch {
-                        writeBossMode(enabled)
+                        if (writeBossMode(enabled).isSuccess) {
+                            kernelMode = enabled
+                            needsRestart = enabled != initialMode.value
+                        } else {
+                            ai.rever.boss.components.bars.horizontal.StatusMessageManager.showMessage(
+                                "Could not save process mode. Check preference-file permissions and logs.",
+                            )
+                        }
                     }
                 },
                 enabled = modeOverride == null,
@@ -191,11 +198,11 @@ fun AdvancedSettings() {
 private suspend fun readBossMode(): Boolean =
     withContext(Dispatchers.IO) {
         ai.rever.boss.config.ConfigLoader
-            .getConfig("BOSS_MODE") == "KERNEL"
+            .bossModeForNextLaunch() == "KERNEL"
     }
 
 private suspend fun writeBossMode(enabled: Boolean) =
     withContext(Dispatchers.IO) {
         ai.rever.boss.config
-            .writeSavedBossMode(enabled)
+            .saveBossMode(enabled)
     }
