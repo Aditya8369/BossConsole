@@ -13,7 +13,7 @@ plugins {
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
-group = "ai.rever.boss.plugin.console"
+group = "ai.rever.boss.plugin.sample"
 version = "1.0.0"
 
 java {
@@ -23,17 +23,18 @@ java {
 }
 
 dependencies {
-    // Plugin API (provided by boss-microkernel-runtime at runtime — don't bundle)
-    compileOnly(project(":plugin-platform:plugin-api-core")) {
-        targetConfiguration = "desktopRuntimeElements"
-    }
+    // Plugin API and IPC (provided by host runtime — don't bundle)
+    compileOnly(project(":plugin-platform:plugin-api-core"))
+    compileOnly(project(":boss-ipc"))
+    compileOnly(project(":boss-ui-sdk"))
 
-    // Plugin runtime (provided — contains PluginStateHolder, RemotePluginContext, etc.)
-    compileOnly(project(":boss-microkernel-runtime"))
-
-    // Your plugin's own dependencies
+    // Plugin's own dependencies
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
+
+    // Unit testing dependencies
+    testImplementation(kotlin("test"))
+    testImplementation(project(":boss-ui-sdk"))
 }
 
 tasks.shadowJar {
@@ -44,9 +45,11 @@ tasks.shadowJar {
         attributes["Main-Class"] = "ai.rever.boss.plugin.runtime.PluginProcessMainKt"
     }
 
-    // Exclude plugin-api-core and boss-microkernel-runtime (provided by the runtime)
+    // Exclude API and host runtime jars (provided by host runtime at runtime)
     dependencies {
         exclude(dependency("ai.rever.boss.plugin:plugin-api-core"))
+        exclude(dependency("ai.rever.boss:boss-ipc"))
+        exclude(dependency("ai.rever.boss:boss-ui-sdk"))
         exclude(dependency("ai.rever.boss.microkernel.runtime:boss-microkernel-runtime"))
     }
 }
