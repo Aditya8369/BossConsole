@@ -1,5 +1,9 @@
 package ai.rever.boss.window
 
+import ai.rever.boss.components.plugin.registries.PluginShortcutRegistryImpl
+import ai.rever.boss.plugin.api.KeyChordSpec
+import ai.rever.boss.plugin.api.PluginShortcutSpec
+import ai.rever.boss.plugin.api.ShortcutActionProvider
 import ai.rever.boss.keymap.KeymapSettingsManager
 import ai.rever.boss.keymap.model.KeyBinding
 import ai.rever.boss.keymap.model.KeymapActions
@@ -11,13 +15,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.awt.Canvas
 import java.awt.KeyboardFocusManager
+import java.beans.PropertyChangeEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.util.concurrent.atomic.AtomicInteger
-import javax.swing.JFrame
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -36,7 +40,8 @@ import kotlin.test.assertTrue
  * 5. Window unregister or clearPendingShortcut cancels the pending shortcut.
  */
 class ShortcutKeyUpSemanticsTest {
-    private lateinit var frame: JFrame
+    private lateinit var previousSettings: KeymapSettings
+    private lateinit var settingsState: MutableStateFlow<KeymapSettings>
     private lateinit var canvas: Canvas
     private val windowId = "test-window-key-release"
     private lateinit var testScope: CoroutineScope
@@ -63,13 +68,14 @@ class ShortcutKeyUpSemanticsTest {
         }
 
         AWTKeyboardInterceptor.install()
-        frame = JFrame("Test Frame")
-        frame.iconImages = BossWindowIcon.images
         canvas = Canvas()
-        frame.add(canvas)
-        frame.pack()
-        AWTKeyboardInterceptor.registerWindow(frame, windowId)
-        AWTKeyboardInterceptor.clearPendingShortcut()
+        AWTKeyboardInterceptor.cancelPendingShortcut()
+        val field = KeymapSettingsManager::class.java.getDeclaredField("_currentSettings")
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val state = field.get(KeymapSettingsManager) as MutableStateFlow<KeymapSettings>
+        settingsState = state
+        previousSettings = state.value
 
         // Configure a known test binding
         val binding =
@@ -80,23 +86,20 @@ class ShortcutKeyUpSemanticsTest {
                 context = ShortcutContext.GLOBAL,
                 enabled = true,
             )
-        runBlocking {
-            KeymapSettingsManager.updateSettings(KeymapSettings.fromBindings(listOf(binding)))
-        }
+        settingsState.value = KeymapSettings.fromBindings(listOf(binding))
     }
 
     @AfterTest
     fun tearDown() {
-        AWTKeyboardInterceptor.clearPendingShortcut()
-        AWTKeyboardInterceptor.unregisterWindow(frame)
+        AWTKeyboardInterceptor.cancelPendingShortcut()
         AWTKeyboardInterceptor.uninstall()
-        frame.dispose()
+        settingsState.value = previousSettings
         collectorJob?.cancel()
         testScope.cancel()
     }
 
     private fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        AWTKeyboardInterceptor.processKeyEvent(event)
+        AWTKeyboardInterceptor.processKeyEvent(event, windowId)
 
     @Test
     fun `matching KEY_PRESSED arms pending shortcut and consumes without action dispatch`() {
@@ -114,7 +117,7 @@ class ShortcutKeyUpSemanticsTest {
 
         assertTrue(consumed, "KeyDown matching shortcut must be consumed")
         assertTrue(keyDown.isConsumed, "KeyEvent must be marked consumed")
-        assertTrue(AWTKeyboardInterceptor.hasPendingShortcut(), "AWTKeyboardInterceptor must have pending shortcut armed")
+        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null), "AWTKeyboardInterceptor must have pending shortcut armed")
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched on key-down")
     }
 
@@ -146,7 +149,7 @@ class ShortcutKeyUpSemanticsTest {
         assertTrue(consumed, "KeyUp on primary key must be consumed")
         assertTrue(keyUp.isConsumed, "KeyUp event must be marked consumed")
         assertEquals(1, newTabEventCount.get(), "Action must be dispatched exactly once on KeyUp")
-        assertFalse(AWTKeyboardInterceptor.hasPendingShortcut(), "Pending shortcut must be cleared after dispatch")
+        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null), "Pending shortcut must be cleared after dispatch")
     }
 
     @Test
@@ -195,7 +198,7 @@ class ShortcutKeyUpSemanticsTest {
                 'T',
             )
         dispatchKeyEvent(keyDown)
-        assertTrue(AWTKeyboardInterceptor.hasPendingShortcut())
+        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null))
 
         // Release modifier key alone (e.g. Cmd/Ctrl)
         val modifierKeyUp =
@@ -211,7 +214,7 @@ class ShortcutKeyUpSemanticsTest {
 
         assertFalse(consumed, "Releasing modifier alone should not be consumed as shortcut execution")
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched when modifier is released alone")
-        assertFalse(AWTKeyboardInterceptor.hasPendingShortcut(), "Pending shortcut must be cancelled on modifier release")
+        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null), "Pending shortcut must be cancelled on modifier release")
 
         // Subsequent primary key release does nothing
         val keyUp =
@@ -225,7 +228,7 @@ class ShortcutKeyUpSemanticsTest {
             )
         val keyUpConsumed = dispatchKeyEvent(keyUp)
 
-        assertFalse(keyUpConsumed)
+        assertTrue(keyUpConsumed, "The cancelled chord still owns the primary release")
         assertEquals(0, newTabEventCount.get())
     }
 
@@ -241,11 +244,16 @@ class ShortcutKeyUpSemanticsTest {
                 'T',
             )
         dispatchKeyEvent(keyDown)
-        assertTrue(AWTKeyboardInterceptor.hasPendingShortcut())
+        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null))
 
-        // Reset/cancel pending shortcut
-        AWTKeyboardInterceptor.clearPendingShortcut()
-        assertFalse(AWTKeyboardInterceptor.hasPendingShortcut())
+        // Exercise the listener registered by install without creating or focusing a window.
+        val manager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val listenerField = AWTKeyboardInterceptor::class.java.getDeclaredField("focusListener")
+        listenerField.isAccessible = true
+        val listener = listenerField.get(AWTKeyboardInterceptor) as java.beans.PropertyChangeListener
+        assertTrue(manager.getPropertyChangeListeners("focusedWindow").contains(listener))
+        listener.propertyChange(PropertyChangeEvent(manager, "focusedWindow", null, null))
+        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null))
 
         // Key up after cancellation should not dispatch action
         val keyUp =
@@ -261,5 +269,125 @@ class ShortcutKeyUpSemanticsTest {
 
         assertFalse(consumed)
         assertEquals(0, newTabEventCount.get())
+    }
+
+    @Test
+    fun `Shift release cancels and held repeats cannot rearm the action`() {
+        val press = KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_T, 'T')
+        assertTrue(dispatchKeyEvent(press))
+        assertFalse(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 1, primaryModifierMask,
+            KeyEvent.VK_SHIFT, KeyEvent.CHAR_UNDEFINED)))
+        repeat(3) { assertTrue(dispatchKeyEvent(press)) }
+        assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 2, primaryModifierMask, KeyEvent.VK_T, 'T')))
+        assertEquals(0, newTabEventCount.get())
+    }
+
+    @Test
+    fun `MRU commits once and cancels a second held Tab when modifier releases first`() {
+        settingsState.value = KeymapSettings.fromBindings(listOf(
+            KeyBinding(actionId = KeymapActions.TAB_NEXT, key = "Tab", modifiers = listOf("Cmd")),
+        )).copy(tabSwitchMode = ai.rever.boss.keymap.model.TabSwitchMode.MRU)
+        val events = mutableListOf<Pair<String, MenuActionsHandler.TabSwitchAction>>()
+        val job = testScope.launch { MenuActionsHandler.tabSwitchEvents.collect { events.add(it) } }
+        fun tab(id: Int) = KeyEvent(canvas, id, 0, primaryModifierMask, KeyEvent.VK_TAB, '\t')
+        assertTrue(dispatchKeyEvent(tab(KeyEvent.KEY_PRESSED)))
+        assertTrue(events.isEmpty())
+        assertTrue(dispatchKeyEvent(tab(KeyEvent.KEY_RELEASED)))
+        assertTrue(dispatchKeyEvent(tab(KeyEvent.KEY_PRESSED)))
+        assertFalse(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 1, 0, modifierKeyCode, KeyEvent.CHAR_UNDEFINED)))
+        assertTrue(dispatchKeyEvent(tab(KeyEvent.KEY_RELEASED)))
+        assertEquals(listOf(windowId to MenuActionsHandler.TabSwitchAction.NEXT,
+            windowId to MenuActionsHandler.TabSwitchAction.COMMIT), events)
+        job.cancel()
+    }
+
+    @Test
+    fun `an unavailable host binding leaves both events unclaimed`() {
+        settingsState.value = KeymapSettings.fromBindings(listOf(
+            KeyBinding(actionId = KeymapActions.QUICK_SWITCHER_OPEN, key = "T", modifiers = listOf("Cmd")),
+        ))
+        for (id in listOf(KeyEvent.KEY_PRESSED, KeyEvent.KEY_RELEASED)) {
+            val event = KeyEvent(canvas, id, 0, primaryModifierMask, KeyEvent.VK_T, 'T')
+            assertFalse(dispatchKeyEvent(event))
+            assertFalse(event.isConsumed)
+        }
+        assertEquals(0, newTabEventCount.get())
+    }
+
+    @Test
+    fun `overlapping chords each fire once on their own release`() {
+        settingsState.value = KeymapSettings.fromBindings(listOf(
+            KeyBinding(actionId = KeymapActions.TAB_NEW, key = "T", modifiers = listOf("Cmd"),
+                alternateKeystrokes = listOf(ai.rever.boss.keymap.model.KeyStroke("N", listOf("Cmd")))),
+        ))
+        for (key in listOf(KeyEvent.VK_N, KeyEvent.VK_T)) {
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, key, key.toChar())))
+        }
+        assertEquals(0, newTabEventCount.get())
+        for ((index, key) in listOf(KeyEvent.VK_N, KeyEvent.VK_T).withIndex()) {
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 0, primaryModifierMask, key, key.toChar())))
+            assertEquals(index + 1, newTabEventCount.get())
+        }
+    }
+
+    @Test
+    fun `plugin defaults and rebinds invoke once and unregistering closes the gate`() {
+        val action = "plugin.shortcut-review.run"
+        var calls = 0
+        val provider = object : ShortcutActionProvider {
+            override val providerId = "shortcut-review"
+            override fun shortcuts() = listOf(PluginShortcutSpec(action, "Test shortcut",
+                defaultBinding = KeyChordSpec("K", setOf("Cmd"))))
+            override fun onAction(actionId: String, windowId: String?) { calls++ }
+        }
+        PluginShortcutRegistryImpl.register(provider)
+        try {
+            for (rebound in listOf(false, true)) {
+                settingsState.value = KeymapSettings.fromBindings(if (rebound) listOf(
+                    KeyBinding(actionId = action, key = "K", modifiers = listOf("Cmd")),
+                ) else emptyList())
+                repeat(3) { assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0,
+                    primaryModifierMask, KeyEvent.VK_K, 'K'))) }
+                assertEquals(if (rebound) 1 else 0, calls)
+                assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 0,
+                    primaryModifierMask, KeyEvent.VK_K, 'K')))
+            }
+            assertEquals(2, calls)
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')))
+            PluginShortcutRegistryImpl.unregister(provider.providerId)
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')))
+            assertEquals(2, calls)
+            assertFalse(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')))
+        } finally {
+            PluginShortcutRegistryImpl.unregister(provider.providerId)
+        }
+    }
+
+    @Test
+    fun `lost primary release cannot turn a later bare character into an action`() {
+        assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_T, 'T')))
+        assertFalse(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 1, 0, KeyEvent.VK_T, 't')))
+        assertFalse(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 2, 0, KeyEvent.VK_T, 't')))
+        assertEquals(0, newTabEventCount.get())
+    }
+
+    @Test
+    fun `closing a dispatch gate while held consumes release without emitting the action`() {
+        settingsState.value = KeymapSettings.fromBindings(listOf(
+            KeyBinding(actionId = KeymapActions.TAB_NEXT_POSITIONAL, key = "T", modifiers = listOf("Cmd")),
+        ))
+        val events = mutableListOf<Pair<String, MenuActionsHandler.TabSwitchAction>>()
+        val job = testScope.launch { MenuActionsHandler.tabSwitchEvents.collect { events.add(it) } }
+        MenuActionsHandler.updateActivePanelTabCount(windowId, 2)
+        try {
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_T, 'T')))
+            assertTrue(events.isEmpty())
+            MenuActionsHandler.updateActivePanelTabCount(windowId, 1)
+            assertTrue(dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 0, primaryModifierMask, KeyEvent.VK_T, 'T')))
+            assertTrue(events.isEmpty())
+        } finally {
+            job.cancel()
+            MenuActionsHandler.updateActivePanelTabCount(windowId, 0)
+        }
     }
 }

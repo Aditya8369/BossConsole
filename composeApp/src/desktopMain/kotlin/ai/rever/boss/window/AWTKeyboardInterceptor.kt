@@ -57,8 +57,9 @@ object AWTKeyboardInterceptor {
     // Accessed only from the AWT event dispatch thread. Process-global (like the double-
     // shift state above): cycling in one window then focusing another without releasing the
     // modifier is a benign mismatch — the stray release just no-ops downstream.
-    private var tabCycleActive = false
     private var tabCycleModifierKeyCode = -1
+    private var tabCycleWindowId: String? = null
+    private val claimedKeys = mutableSetOf<Int>()
 
     // Minimum time shift must be released to count as a clean release (prevents false positives from held shift)
     private const val MIN_SHIFT_RELEASE_MS = 50
@@ -81,13 +82,17 @@ object AWTKeyboardInterceptor {
         val pluginActionId: String? = null,
     )
 
-    // The shortcut armed on a currently-held key, or null. Process-global like the double-
-    // shift and tab-cycle state above, for the same reason: a chord armed in one window and
-    // released after focus moved elsewhere is a narrow, harmless mismatch, not a leak - the
-    // stray release just finds nothing to fire. Accessed only from the AWT event dispatch
-    // thread and the focus-loss listener installed alongside the dispatcher, both of which
-    // run there.
-    internal var pendingShortcut: PendingShortcut? = null
+    // One pending action per physical primary key supports overlapping chords. Normal
+    // dispatch and focus changes run on the EDT; shutdown also clears this state.
+    private val pendingShortcuts = mutableMapOf<Int, PendingShortcut>()
+
+    // Retained as the test seam for the original single-chord regression suite.
+    internal var pendingShortcut: PendingShortcut?
+        get() = pendingShortcuts.values.firstOrNull()
+        set(value) {
+            pendingShortcuts.clear()
+            if (value != null) pendingShortcuts[value.keyCode] = value
+        }
 
     private var focusListener: java.beans.PropertyChangeListener? = null
 
@@ -107,6 +112,8 @@ object AWTKeyboardInterceptor {
      * Call this from BossWindow's DisposableEffect onDispose.
      */
     fun unregisterWindow(awtWindow: Window) {
+        cancelPendingShortcut()
+        finishTabCycle()
         val windowId = windowIdMap.remove(awtWindow)
         if (windowId != null) {
             windowContextMap.remove(windowId)
@@ -152,99 +159,7 @@ object AWTKeyboardInterceptor {
     fun install() {
         if (isInstalled) return
 
-        dispatcher =
-            KeyEventDispatcher { event ->
-                // Handle double-shift detection for global search
-                if (event.keyCode == KeyEvent.VK_SHIFT) {
-                    val currentTime = System.currentTimeMillis()
-
-                    when (event.id) {
-                        KeyEvent.KEY_PRESSED -> {
-                            // Check if this is a quick second press after a clean release
-                            val timeSinceRelease = currentTime - lastShiftReleaseTime
-                            if (timeSinceRelease < DOUBLE_SHIFT_THRESHOLD_MS &&
-                                timeSinceRelease >= MIN_SHIFT_RELEASE_MS && // Ensure clean release (not held)
-                                shiftPressCount == 1
-                            ) {
-                                // Double-shift detected!
-                                shiftPressCount = 0
-                                lastShiftPressTime = 0
-                                lastShiftReleaseTime = 0
-
-                                // Get the focused window's BOSS window ID
-                                val focusedWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow
-                                val windowId = findWindowId(focusedWindow)
-                                if (windowId != null) {
-                                    try {
-                                        MenuActionsHandler.triggerOpenGlobalSearch(windowId)
-                                        event.consume()
-                                        return@KeyEventDispatcher true
-                                    } catch (e: Exception) {
-                                        // Log but don't crash the event dispatcher
-                                        System.err.println("Error triggering global search: ${e.message}")
-                                    }
-                                }
-                            } else {
-                                // First shift press or timeout - start counting
-                                shiftPressCount = 1
-                                lastShiftPressTime = currentTime
-                            }
-                        }
-
-                        KeyEvent.KEY_RELEASED -> {
-                            // Record release time for detecting second press
-                            if (shiftPressCount == 1 && currentTime - lastShiftPressTime < DOUBLE_SHIFT_THRESHOLD_MS) {
-                                lastShiftReleaseTime = currentTime
-                            } else {
-                                // Too slow or wrong sequence - reset
-                                shiftPressCount = 0
-                            }
-                        }
-                    }
-                    return@KeyEventDispatcher false // Let shift events propagate
-                }
-
-                // Reset double-shift state if any other key is pressed
-                if (event.id == KeyEvent.KEY_PRESSED && !isModifierOnlyKey(event.keyCode)) {
-                    shiftPressCount = 0
-                    lastShiftPressTime = 0
-                    lastShiftReleaseTime = 0
-                }
-
-                // Commit an in-progress MRU tab cycle when its own cycling modifier is released.
-                // Only fires while a cycle is active and only for that specific modifier, so
-                // unrelated modifier keyups don't churn the UI thread or commit prematurely.
-                // The release itself is not consumed.
-                if (event.id == KeyEvent.KEY_RELEASED && tabCycleActive && event.keyCode == tabCycleModifierKeyCode) {
-                    tabCycleActive = false
-                    val focusedWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow
-                    findWindowId(focusedWindow)?.let { MenuActionsHandler.triggerCommitTabCycle(it) }
-                    return@KeyEventDispatcher false
-                }
-
-                // Only shortcuts from here on, and only these two event kinds.
-                if (event.id != KeyEvent.KEY_PRESSED && event.id != KeyEvent.KEY_RELEASED) {
-                    return@KeyEventDispatcher false
-                }
-
-                val handled =
-                    if (event.id == KeyEvent.KEY_RELEASED) {
-                        // Uses the windowId captured when the chord was armed, not whatever is
-                        // focused now - if focus moved, the listener below already cleared
-                        // pendingShortcut and this finds nothing to fire.
-                        handleKeyReleased(event)
-                    } else {
-                        val focusedWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow
-                        val windowId = findWindowId(focusedWindow)
-                        windowId != null && handleKeyPressed(event, windowId)
-                    }
-
-                if (handled) {
-                    // Consume the event to prevent it from reaching BossTerm
-                    event.consume()
-                }
-                handled
-            }
+        dispatcher = KeyEventDispatcher { event -> processKeyEvent(event) }
 
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(dispatcher)
         focusListener =
@@ -253,9 +168,74 @@ object AWTKeyboardInterceptor {
                 // BossConsole#490 requires this to drop any pending shortcut rather than fire
                 // it, or leave it armed, for whichever key happens to release next.
                 cancelPendingShortcut()
+                finishTabCycle()
             }
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addPropertyChangeListener("focusedWindow", focusListener)
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addPropertyChangeListener("focusOwner", focusListener)
         isInstalled = true
+    }
+
+    /** The same dispatcher path is exercised with an explicit window id in headless tests. */
+    internal fun processKeyEvent(
+        event: KeyEvent,
+        windowId: String? = findWindowId(KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow),
+    ): Boolean {
+        // Modifier cancellation must precede both the Shift gesture and MRU commit paths.
+        if (event.id == KeyEvent.KEY_RELEASED && isModifierOnlyKey(event.keyCode)) {
+            pendingShortcuts.clear()
+            if (event.keyCode == tabCycleModifierKeyCode) finishTabCycle()
+        }
+        if (event.keyCode == KeyEvent.VK_SHIFT) return handleShiftEvent(event, windowId)
+        if (event.id == KeyEvent.KEY_PRESSED && !isModifierOnlyKey(event.keyCode)) {
+            shiftPressCount = 0
+            lastShiftPressTime = 0
+            lastShiftReleaseTime = 0
+        }
+        val handled = when (event.id) {
+            KeyEvent.KEY_RELEASED -> handleKeyReleased(event)
+            KeyEvent.KEY_PRESSED -> windowId != null && handleKeyPressed(event, windowId)
+            else -> false
+        }
+        if (handled) event.consume()
+        return handled
+    }
+
+    private fun handleShiftEvent(event: KeyEvent, windowId: String?): Boolean {
+        val now = System.currentTimeMillis()
+        var handled = false
+        when (event.id) {
+            KeyEvent.KEY_PRESSED -> {
+                val gap = now - lastShiftReleaseTime
+                if (gap in MIN_SHIFT_RELEASE_MS until DOUBLE_SHIFT_THRESHOLD_MS && shiftPressCount == 1) {
+                    shiftPressCount = 0
+                    lastShiftPressTime = 0
+                    lastShiftReleaseTime = 0
+                    if (windowId != null) {
+                        MenuActionsHandler.triggerOpenGlobalSearch(windowId)
+                        event.consume()
+                        handled = true
+                    }
+                } else {
+                    shiftPressCount = 1
+                    lastShiftPressTime = now
+                }
+            }
+            KeyEvent.KEY_RELEASED -> {
+                if (shiftPressCount == 1 && now - lastShiftPressTime < DOUBLE_SHIFT_THRESHOLD_MS) {
+                    lastShiftReleaseTime = now
+                } else {
+                    shiftPressCount = 0
+                }
+            }
+        }
+        return handled
+    }
+
+    private fun finishTabCycle() {
+        val windowId = tabCycleWindowId
+        tabCycleModifierKeyCode = -1
+        tabCycleWindowId = null
+        if (windowId != null) MenuActionsHandler.triggerCommitTabCycle(windowId)
     }
 
     /**
@@ -269,12 +249,14 @@ object AWTKeyboardInterceptor {
         dispatcher = null
         focusListener?.let { l ->
             KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener("focusedWindow", l)
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removePropertyChangeListener("focusOwner", l)
         }
         focusListener = null
         isInstalled = false
         windowIdMap.clear()
         windowContextMap.clear()
         cancelPendingShortcut()
+        finishTabCycle()
     }
 
     /**
@@ -295,8 +277,12 @@ object AWTKeyboardInterceptor {
         // doesn't leak to the focused component while held) without re-matching, re-arming,
         // or invoking anything a second time. This is what stops OS auto-repeat from firing
         // the action over and over - the actual fire happens once, in handleKeyReleased.
-        pendingShortcut?.let { armed ->
-            if (event.keyCode == armed.keyCode) return true
+        val pending = pendingShortcuts[event.keyCode]
+        if (pending != null && !event.isMetaDown && !event.isControlDown && !event.isAltDown) {
+            pendingShortcuts.remove(event.keyCode)
+            claimedKeys.remove(event.keyCode)
+        } else if (event.keyCode in claimedKeys || pending != null) {
+            return true
         }
 
         // Skip if no modifier keys are pressed (most shortcuts require modifiers)
@@ -346,7 +332,8 @@ object AWTKeyboardInterceptor {
                 return false
             }
 
-            pendingShortcut = PendingShortcut(keyCode = event.keyCode, windowId = windowId, hostBinding = match)
+            claimedKeys.add(event.keyCode)
+            pendingShortcuts[event.keyCode] = PendingShortcut(keyCode = event.keyCode, windowId = windowId, hostBinding = match)
             return true
         }
 
@@ -358,10 +345,11 @@ object AWTKeyboardInterceptor {
         // that actionId.
         val pluginActionId = findMatchingPluginDefault(event)
         if (pluginActionId != null) {
+            claimedKeys.add(event.keyCode)
             // No side-effect-free way to ask PluginShortcutRegistryImpl "would you handle
             // this" without actually dispatching, so this arms on chord match alone and is
             // confirmed for real at key-up in handleKeyReleased.
-            pendingShortcut =
+            pendingShortcuts[event.keyCode] =
                 PendingShortcut(keyCode = event.keyCode, windowId = windowId, pluginActionId = pluginActionId)
             return true
         }
@@ -379,35 +367,25 @@ object AWTKeyboardInterceptor {
      * is not consumed.
      */
     internal fun handleKeyReleased(event: KeyEvent): Boolean {
-        val pending = pendingShortcut ?: return false
-        if (event.keyCode != pending.keyCode) return false
-        pendingShortcut = null
+        val claimed = claimedKeys.remove(event.keyCode)
+        if (isModifierOnlyKey(event.keyCode)) {
+            pendingShortcuts.clear()
+        }
+        val pending = pendingShortcuts.remove(event.keyCode) ?: return claimed
 
-        return if (pending.pluginActionId != null) {
+        if (pending.pluginActionId != null) {
             PluginShortcutRegistryImpl.dispatch(pending.pluginActionId, pending.windowId)
         } else {
-            val binding = pending.hostBinding!!.binding
-            val handled = dispatchAction(binding.actionId, pending.windowId, perform = true)
-
-            // Begin (or continue) an MRU tab cycle: remember which modifier is sustaining it
-            // so its release - and only its release - commits the cycle. This arms even when
-            // the focused panel has <=1 tab (the component-side switchTab/commit then no-op),
-            // so the interceptor may briefly believe a cycle is active when none is -
-            // harmless, and Tab stays swallowed.
-            if (handled &&
-                (binding.actionId == KeymapActions.TAB_NEXT || binding.actionId == KeymapActions.TAB_PREVIOUS) &&
-                KeymapSettingsManager.currentSettings.value.tabSwitchMode == TabSwitchMode.MRU
-            ) {
-                tabCycleActive = true
-                // From the keystroke that MATCHED, not the binding's primary: an alternate can
-                // carry the other primary modifier, and arming on Meta while the user holds
-                // Control means the release never commits. The switcher overlay then stays on
-                // screen with Tab swallowed until some unrelated modifier release happens to
-                // match.
-                tabCycleModifierKeyCode = cyclingModifierKeyCode(pending.hostBinding.keystroke)
+            val match = checkNotNull(pending.hostBinding)
+            val handled = dispatchAction(match.binding.actionId, pending.windowId, perform = true)
+            val cyclesTabs = match.binding.actionId in setOf(KeymapActions.TAB_NEXT, KeymapActions.TAB_PREVIOUS)
+            if (handled && cyclesTabs && KeymapSettingsManager.currentSettings.value.tabSwitchMode == TabSwitchMode.MRU) {
+                tabCycleWindowId = pending.windowId
+                tabCycleModifierKeyCode = cyclingModifierKeyCode(match.keystroke)
             }
-            handled
         }
+        // The press was claimed. Its release remains ours even if the action became unavailable.
+        return true
     }
 
     /**
@@ -416,7 +394,8 @@ object AWTKeyboardInterceptor {
      * on [uninstall]; safe to call when nothing is pending.
      */
     internal fun cancelPendingShortcut() {
-        pendingShortcut = null
+        pendingShortcuts.clear()
+        claimedKeys.clear()
     }
 
     /**
@@ -1033,10 +1012,13 @@ object AWTKeyboardInterceptor {
                     // reached when the user rebound a plugin shortcut (the binding
                     // then lives in the keymap settings and matches the main pass).
                     actionId.startsWith(PluginShortcutRegistryImpl.ACTION_ID_PREFIX) -> {
-                        // No side-effect-free probe exists for a plugin dispatch (unlike the
-                        // gates above), so a perform = false call optimistically reports
-                        // claimed; handleKeyReleased confirms for real at perform = true.
-                        if (perform) PluginShortcutRegistryImpl.dispatch(actionId, windowId) else true
+                        // The registry's presence check is side-effect-free. Dispatch rechecks
+                        // it on release in case the provider was unregistered while held.
+                        if (perform) {
+                            PluginShortcutRegistryImpl.dispatch(actionId, windowId)
+                        } else {
+                            PluginShortcutRegistryImpl.shortcuts.value.any { it.spec.actionId == actionId }
+                        }
                     }
 
                     else -> {

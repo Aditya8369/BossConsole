@@ -1,31 +1,30 @@
 package ai.rever.boss.components.events
 
 import ai.rever.boss.keymap.KeymapSettingsManager
-import ai.rever.boss.keymap.handler.KeymapMatcher
-import ai.rever.boss.keymap.model.KeyBinding
+import ai.rever.boss.keymap.handler.KeymapHandler
 import ai.rever.boss.keymap.model.ShortcutContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
 
 /**
  * Set of modifier-only keys that should not trigger shortcut matching.
  * These keys don't have a standalone action and are only used in combination.
  */
-val MODIFIER_ONLY_KEYS =
+internal val MODIFIER_ONLY_KEYS =
     setOf(
         Key.CapsLock,
         Key.ShiftLeft,
@@ -61,74 +60,34 @@ fun Modifier.interceptKeyboardShortcuts(
     context: ShortcutContext,
 ): Modifier {
     val settings by KeymapSettingsManager.currentSettings.collectAsState()
-    val matcher = remember(settings) { KeymapMatcher(settings) }
+    val handler = remember(settings, windowId, context) { KeymapHandler(settings) }
     val coroutineScope = rememberCoroutineScope()
-    var pendingKey by remember { mutableStateOf<Key?>(null) }
-    var pendingBinding by remember { mutableStateOf<KeyBinding?>(null) }
-
-    return this.onPreviewKeyEvent { keyEvent ->
-        when (keyEvent.type) {
-            KeyEventType.KeyDown -> {
-                // Skip modifier-only keys
-                if (keyEvent.key in MODIFIER_ONLY_KEYS) {
-                    return@onPreviewKeyEvent false
-                }
-
-                // Check auto-repeat for the pending primary key
-                if (pendingKey == keyEvent.key && pendingBinding != null) {
-                    return@onPreviewKeyEvent true
-                }
-
-                // Check if this key combo matches any shortcut
-                val binding = matcher.match(keyEvent, context)
-                if (binding != null) {
-                    pendingKey = keyEvent.key
-                    pendingBinding = binding
-                    true // Consume key down event - don't let wrapped component handle it
-                } else {
-                    pendingKey = null
-                    pendingBinding = null
-                    false // Let wrapped component handle regular input
-                }
-            }
-
-            KeyEventType.KeyUp -> {
-                val currentPendingKey = pendingKey
-                val currentPendingBinding = pendingBinding
-                if (currentPendingKey != null && currentPendingBinding != null) {
-                    if (keyEvent.key == currentPendingKey) {
-                        pendingKey = null
-                        pendingBinding = null
-                        // Emit to KeyboardEventBus for action execution on primary key release
-                        coroutineScope.launch {
-                            KeyboardEventBus.emit(
-                                KeyboardEvent(
-                                    keyEvent = keyEvent,
-                                    source = source,
-                                    context = context,
-                                    sourceWindowId = windowId,
-                                ),
-                            )
-                        }
-                        true
-                    } else if (keyEvent.key in MODIFIER_ONLY_KEYS) {
-                        // Releasing modifier alone cancels pending shortcut
-                        pendingKey = null
-                        pendingBinding = null
-                        false
-                    } else {
-                        pendingKey = null
-                        pendingBinding = null
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-
-            else -> false
+    val windowInfo = LocalWindowInfo.current
+    LaunchedEffect(handler, windowInfo) {
+        snapshotFlow { windowInfo.isWindowFocused }.collect { focused ->
+            if (!focused) handler.clearPendingShortcut()
         }
     }
+    DisposableEffect(handler) {
+        onDispose { handler.clearPendingShortcut() }
+    }
+
+    return this.onFocusChanged { if (!it.hasFocus) handler.clearPendingShortcut() }
+        .onPreviewKeyEvent { keyEvent ->
+            handler.handleKeyEvent(keyEvent, context) {
+                coroutineScope.launch {
+                    KeyboardEventBus.emit(
+                        KeyboardEvent(
+                            keyEvent = keyEvent,
+                            source = source,
+                            context = context,
+                            sourceWindowId = windowId,
+                        ),
+                    )
+                }
+                true
+            }
+        }
 }
 
 /**

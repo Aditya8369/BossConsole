@@ -480,7 +480,7 @@ class KeymapHandlerTest {
             true
         }
 
-        assertFalse(keyUpHandled)
+        assertTrue(keyUpHandled, "The claimed primary release stays consumed after cancellation")
         assertFalse(executed)
     }
 
@@ -518,5 +518,39 @@ class KeymapHandlerTest {
 
         assertFalse(handled)
         assertFalse(executed)
+    }
+
+    @Test
+    fun `updated bindings replace matcher and context changes cancel a held action`() {
+        val binding = KeyBinding(actionId = "test.action", key = "N", modifiers = listOf("Cmd"))
+        val handler = KeymapHandler(KeymapSettings.fromBindings(listOf(binding)))
+        handler.updateSettings(KeymapSettings.fromBindings(listOf(binding.copy(key = "T"))))
+        var calls = 0
+        val execute: (String) -> Boolean = { calls++; true }
+        assertFalse(handler.handleKeyEvent(createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true),
+            ShortcutContext.GLOBAL, execute))
+        assertTrue(handler.handleKeyEvent(createKeyEvent(Key.T, KeyEventType.KeyDown, meta = true),
+            ShortcutContext.GLOBAL, execute))
+        assertTrue(handler.handleKeyEvent(createKeyEvent(Key.T, KeyEventType.KeyUp, meta = true),
+            ShortcutContext.TERMINAL, execute))
+        assertEquals(0, calls)
+    }
+
+    @Test
+    fun `overlapping Compose chords retain each action and suppress repeats`() {
+        val bindings = listOf("N", "T").map { KeyBinding(actionId = it, key = it, modifiers = listOf("Cmd")) }
+        val handler = KeymapHandler(KeymapSettings.fromBindings(bindings))
+        val calls = mutableListOf<String>()
+        val execute: (String) -> Boolean = { calls.add(it); true }
+        for (key in listOf(Key.N, Key.T, Key.N)) {
+            assertTrue(handler.handleKeyEvent(createKeyEvent(key, KeyEventType.KeyDown, meta = true),
+                ShortcutContext.GLOBAL, execute))
+        }
+        assertTrue(calls.isEmpty())
+        for (key in listOf(Key.N, Key.T)) {
+            assertTrue(handler.handleKeyEvent(createKeyEvent(key, KeyEventType.KeyUp, meta = true),
+                ShortcutContext.GLOBAL, execute))
+        }
+        assertEquals(listOf("N", "T"), calls)
     }
 }

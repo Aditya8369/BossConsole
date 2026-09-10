@@ -86,7 +86,7 @@ class ShortcutKeyUpInvocationTest {
         AWTKeyboardInterceptor.pendingShortcut = pending
 
         assertFalse(AWTKeyboardInterceptor.handleKeyReleased(keyEvent(KeyEvent.KEY_RELEASED, KeyEvent.VK_CONTROL)))
-        assertEquals(pending, AWTKeyboardInterceptor.pendingShortcut)
+        assertNull(AWTKeyboardInterceptor.pendingShortcut)
     }
 
     @Test
@@ -161,9 +161,9 @@ class ShortcutKeyUpInvocationTest {
         MenuActionsHandler.updateActivePanelTabCount(windowId, 1)
         assertFalse(MenuActionsHandler.canStepTabs(windowId))
 
-        assertFalse(
+        assertTrue(
             AWTKeyboardInterceptor.handleKeyReleased(keyEvent(KeyEvent.KEY_RELEASED, KeyEvent.VK_CLOSE_BRACKET)),
-            "the gate closed before release, so nothing should fire",
+            "the action gate closes, but an already claimed chord still owns its release",
         )
     }
 
@@ -191,7 +191,7 @@ class ShortcutKeyUpInvocationTest {
             )
 
         val release = keyEvent(KeyEvent.KEY_RELEASED, KeyEvent.VK_N)
-        assertFalse(AWTKeyboardInterceptor.handleKeyReleased(release))
+        assertTrue(AWTKeyboardInterceptor.handleKeyReleased(release))
         assertNull(
             AWTKeyboardInterceptor.pendingShortcut,
             "the attempt still clears the armed state, even when unhandled",
