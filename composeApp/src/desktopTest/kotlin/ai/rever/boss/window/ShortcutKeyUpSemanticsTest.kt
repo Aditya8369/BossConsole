@@ -117,7 +117,7 @@ class ShortcutKeyUpSemanticsTest {
 
         assertTrue(consumed, "KeyDown matching shortcut must be consumed")
         assertTrue(keyDown.isConsumed, "KeyEvent must be marked consumed")
-        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null), "AWTKeyboardInterceptor must have pending shortcut armed")
+        assertTrue(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty(), "AWTKeyboardInterceptor must have pending shortcut armed")
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched on key-down")
     }
 
@@ -149,7 +149,7 @@ class ShortcutKeyUpSemanticsTest {
         assertTrue(consumed, "KeyUp on primary key must be consumed")
         assertTrue(keyUp.isConsumed, "KeyUp event must be marked consumed")
         assertEquals(1, newTabEventCount.get(), "Action must be dispatched exactly once on KeyUp")
-        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null), "Pending shortcut must be cleared after dispatch")
+        assertFalse(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty(), "Pending shortcut must be cleared after dispatch")
     }
 
     @Test
@@ -198,7 +198,7 @@ class ShortcutKeyUpSemanticsTest {
                 'T',
             )
         dispatchKeyEvent(keyDown)
-        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null))
+        assertTrue(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty())
 
         // Release modifier key alone (e.g. Cmd/Ctrl)
         val modifierKeyUp =
@@ -214,7 +214,7 @@ class ShortcutKeyUpSemanticsTest {
 
         assertFalse(consumed, "Releasing modifier alone should not be consumed as shortcut execution")
         assertEquals(0, newTabEventCount.get(), "Action must not be dispatched when modifier is released alone")
-        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null), "Pending shortcut must be cancelled on modifier release")
+        assertFalse(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty(), "Pending shortcut must be cancelled on modifier release")
 
         // Subsequent primary key release does nothing
         val keyUp =
@@ -244,7 +244,7 @@ class ShortcutKeyUpSemanticsTest {
                 'T',
             )
         dispatchKeyEvent(keyDown)
-        assertTrue((AWTKeyboardInterceptor.pendingShortcut != null))
+        assertTrue(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty())
 
         // Exercise the listener registered by install without creating or focusing a window.
         val manager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
@@ -253,7 +253,7 @@ class ShortcutKeyUpSemanticsTest {
         val listener = listenerField.get(AWTKeyboardInterceptor) as java.beans.PropertyChangeListener
         assertTrue(manager.getPropertyChangeListeners("focusedWindow").contains(listener))
         listener.propertyChange(PropertyChangeEvent(manager, "focusedWindow", null, null))
-        assertFalse((AWTKeyboardInterceptor.pendingShortcut != null))
+        assertFalse(AWTKeyboardInterceptor.pendingShortcuts.isNotEmpty())
 
         // Key up after cancellation should not dispatch action
         val keyUp =

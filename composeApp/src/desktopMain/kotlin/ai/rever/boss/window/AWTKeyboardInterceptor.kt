@@ -80,19 +80,22 @@ object AWTKeyboardInterceptor {
         val windowId: String,
         val hostBinding: BindingMatch? = null,
         val pluginActionId: String? = null,
-    )
+        val metaDown: Boolean = false,
+        val controlDown: Boolean = false,
+        val shiftDown: Boolean = false,
+        val altDown: Boolean = false,
+    ) {
+        /** Whether the key press carries the same modifier flags as the armed chord. */
+        fun sameModifiersAs(event: KeyEvent): Boolean =
+            metaDown == event.isMetaDown &&
+                controlDown == event.isControlDown &&
+                shiftDown == event.isShiftDown &&
+                altDown == event.isAltDown
+    }
 
     // One pending action per physical primary key supports overlapping chords. Normal
     // dispatch and focus changes run on the EDT; shutdown also clears this state.
-    private val pendingShortcuts = mutableMapOf<Int, PendingShortcut>()
-
-    // Retained as the test seam for the original single-chord regression suite.
-    internal var pendingShortcut: PendingShortcut?
-        get() = pendingShortcuts.values.firstOrNull()
-        set(value) {
-            pendingShortcuts.clear()
-            if (value != null) pendingShortcuts[value.keyCode] = value
-        }
+    internal val pendingShortcuts = HashMap<Int, PendingShortcut>()
 
     private var focusListener: java.beans.PropertyChangeListener? = null
 
@@ -112,10 +115,14 @@ object AWTKeyboardInterceptor {
      * Call this from BossWindow's DisposableEffect onDispose.
      */
     fun unregisterWindow(awtWindow: Window) {
-        cancelPendingShortcut()
-        finishTabCycle()
         val windowId = windowIdMap.remove(awtWindow)
         if (windowId != null) {
+            pendingShortcuts.entries.removeAll { entry ->
+                (entry.value.windowId == windowId).also { removed ->
+                    if (removed) claimedKeys.remove(entry.key)
+                }
+            }
+            if (tabCycleWindowId == windowId) finishTabCycle()
             windowContextMap.remove(windowId)
         }
     }
@@ -278,7 +285,7 @@ object AWTKeyboardInterceptor {
         // or invoking anything a second time. This is what stops OS auto-repeat from firing
         // the action over and over - the actual fire happens once, in handleKeyReleased.
         val pending = pendingShortcuts[event.keyCode]
-        if (pending != null && !event.isMetaDown && !event.isControlDown && !event.isAltDown) {
+        if (pending != null && (pending.windowId != windowId || !pending.sameModifiersAs(event))) {
             pendingShortcuts.remove(event.keyCode)
             claimedKeys.remove(event.keyCode)
         } else if (event.keyCode in claimedKeys || pending != null) {
@@ -333,7 +340,11 @@ object AWTKeyboardInterceptor {
             }
 
             claimedKeys.add(event.keyCode)
-            pendingShortcuts[event.keyCode] = PendingShortcut(keyCode = event.keyCode, windowId = windowId, hostBinding = match)
+            pendingShortcuts[event.keyCode] = PendingShortcut(
+                keyCode = event.keyCode, windowId = windowId, hostBinding = match,
+                metaDown = event.isMetaDown, controlDown = event.isControlDown,
+                shiftDown = event.isShiftDown, altDown = event.isAltDown,
+            )
             return true
         }
 
@@ -350,7 +361,11 @@ object AWTKeyboardInterceptor {
             // this" without actually dispatching, so this arms on chord match alone and is
             // confirmed for real at key-up in handleKeyReleased.
             pendingShortcuts[event.keyCode] =
-                PendingShortcut(keyCode = event.keyCode, windowId = windowId, pluginActionId = pluginActionId)
+                PendingShortcut(
+                    keyCode = event.keyCode, windowId = windowId, pluginActionId = pluginActionId,
+                    metaDown = event.isMetaDown, controlDown = event.isControlDown,
+                    shiftDown = event.isShiftDown, altDown = event.isAltDown,
+                )
             return true
         }
 
@@ -362,7 +377,7 @@ object AWTKeyboardInterceptor {
      * BossConsole#490 shortcut actually invokes anything. Returns whether the release should
      * be consumed.
      *
-     * A released key that doesn't match [pendingShortcut] - including a modifier released by
+     * A released key that doesn't match [pendingShortcuts] - including a modifier released by
      * itself, since a modifier can never BE [PendingShortcut.keyCode] - invokes nothing and
      * is not consumed.
      */
