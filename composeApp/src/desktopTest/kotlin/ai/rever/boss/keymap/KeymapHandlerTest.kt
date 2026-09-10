@@ -5,6 +5,8 @@ import ai.rever.boss.keymap.handler.MapBasedActionExecutor
 import ai.rever.boss.keymap.model.KeyBinding
 import ai.rever.boss.keymap.model.KeymapSettings
 import ai.rever.boss.keymap.model.ShortcutContext
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -324,5 +326,197 @@ class KeymapHandlerTest {
 
         assertNotNull(handler)
         assertTrue(handler.isBound("test.action"))
+    }
+
+    // ==================== KEY RELEASE & REPEAT SEMANTICS TESTS ====================
+
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    private fun createKeyEvent(
+        key: Key,
+        type: KeyEventType,
+        meta: Boolean = false,
+        ctrl: Boolean = false,
+        shift: Boolean = false,
+        alt: Boolean = false,
+    ): androidx.compose.ui.input.key.KeyEvent =
+        androidx.compose.ui.input.key.KeyEvent(
+            key = key,
+            type = type,
+            isMetaPressed = if (ai.rever.boss.utils.SystemUtils.isMacOS) meta else false,
+            isCtrlPressed = if (ai.rever.boss.utils.SystemUtils.isMacOS) ctrl else (meta || ctrl),
+            isShiftPressed = shift,
+            isAltPressed = alt,
+        )
+
+    @Test
+    fun `handleKeyEvent on KeyDown consumes event without executing action`() {
+        val binding =
+            KeyBinding(
+                actionId = "test.action",
+                key = "N",
+                modifiers = listOf("Cmd"),
+                context = ShortcutContext.GLOBAL,
+                enabled = true,
+            )
+
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding)))
+        var executed = false
+
+        val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
+        val handled = handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+
+        assertTrue(handled, "KeyDown matching shortcut should be consumed")
+        assertFalse(executed, "KeyDown must not execute the action yet")
+        assertTrue(handler.hasPendingShortcut, "Handler should have pending shortcut armed")
+    }
+
+    @Test
+    fun `handleKeyEvent on KeyUp after matching KeyDown executes action exactly once`() {
+        val binding =
+            KeyBinding(
+                actionId = "test.action",
+                key = "N",
+                modifiers = listOf("Cmd"),
+                context = ShortcutContext.GLOBAL,
+                enabled = true,
+            )
+
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding)))
+        var executionCount = 0
+
+        val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
+        handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+            executionCount++
+            true
+        }
+
+        val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
+        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+            executionCount++
+            true
+        }
+
+        assertTrue(handled, "KeyUp should be handled")
+        assertEquals(1, executionCount, "Action must be executed exactly once on KeyUp")
+        assertFalse(handler.hasPendingShortcut, "Pending shortcut should be cleared after execution")
+    }
+
+    @Test
+    fun `repeated KeyDown events do not trigger multiple executions`() {
+        val binding =
+            KeyBinding(
+                actionId = "test.action",
+                key = "N",
+                modifiers = listOf("Cmd"),
+                context = ShortcutContext.GLOBAL,
+                enabled = true,
+            )
+
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding)))
+        var executionCount = 0
+
+        // Simulate auto-repeat key-down events
+        repeat(5) {
+            val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
+            val handled = handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+                executionCount++
+                true
+            }
+            assertTrue(handled, "Auto-repeat KeyDown should be consumed")
+        }
+
+        assertEquals(0, executionCount, "Auto-repeat KeyDown events must not execute action")
+
+        // Release primary key
+        val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
+        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+            executionCount++
+            true
+        }
+
+        assertTrue(handled, "KeyUp should be handled")
+        assertEquals(1, executionCount, "Action must execute exactly once upon release")
+    }
+
+    @Test
+    fun `releasing modifier alone cancels pending chord without executing action`() {
+        val binding =
+            KeyBinding(
+                actionId = "test.action",
+                key = "N",
+                modifiers = listOf("Cmd"),
+                context = ShortcutContext.GLOBAL,
+                enabled = true,
+            )
+
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding)))
+        var executed = false
+
+        val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
+        handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+        assertTrue(handler.hasPendingShortcut)
+
+        // Release Meta/Cmd modifier alone
+        val modifierKeyUp = createKeyEvent(Key.MetaLeft, KeyEventType.KeyUp, meta = false)
+        val handled = handler.handleKeyEvent(modifierKeyUp, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+
+        assertFalse(handled, "Modifier release alone should not be consumed as action")
+        assertFalse(executed, "Modifier release must not execute the action")
+        assertFalse(handler.hasPendingShortcut, "Pending shortcut must be cancelled on modifier release")
+
+        // Subsequent primary key up should do nothing
+        val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = false)
+        val keyUpHandled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+
+        assertFalse(keyUpHandled)
+        assertFalse(executed)
+    }
+
+    @Test
+    fun `clearPendingShortcut cancels pending shortcut on focus loss or reset`() {
+        val binding =
+            KeyBinding(
+                actionId = "test.action",
+                key = "N",
+                modifiers = listOf("Cmd"),
+                context = ShortcutContext.GLOBAL,
+                enabled = true,
+            )
+
+        val handler = KeymapHandler.from(KeymapSettings.fromBindings(listOf(binding)))
+        var executed = false
+
+        val keyDown = createKeyEvent(Key.N, KeyEventType.KeyDown, meta = true)
+        handler.handleKeyEvent(keyDown, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+        assertTrue(handler.hasPendingShortcut)
+
+        // Focus loss or cancellation clears pending state
+        handler.clearPendingShortcut()
+        assertFalse(handler.hasPendingShortcut)
+
+        // Subsequent key up should not trigger action
+        val keyUp = createKeyEvent(Key.N, KeyEventType.KeyUp, meta = true)
+        val handled = handler.handleKeyEvent(keyUp, ShortcutContext.GLOBAL) {
+            executed = true
+            true
+        }
+
+        assertFalse(handled)
+        assertFalse(executed)
     }
 }

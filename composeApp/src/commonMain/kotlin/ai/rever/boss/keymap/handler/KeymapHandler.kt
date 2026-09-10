@@ -1,12 +1,26 @@
 package ai.rever.boss.keymap.handler
 
+import ai.rever.boss.components.events.MODIFIER_ONLY_KEYS
 import ai.rever.boss.keymap.model.KeyBinding
 import ai.rever.boss.keymap.model.KeymapActions
 import ai.rever.boss.keymap.model.KeymapSettings
 import ai.rever.boss.keymap.model.ShortcutContext
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+
+/**
+ * Information about an armed shortcut chord pending primary key release.
+ */
+data class PendingKeymapShortcut(
+    val binding: KeyBinding,
+    val primaryKey: Key,
+    val context: ShortcutContext,
+)
 
 /**
  * Context-aware keyboard shortcut handler.
@@ -14,6 +28,8 @@ import androidx.compose.ui.input.key.KeyEvent
  * 1. Current UI context (browser, terminal, workspace, etc.)
  * 2. Configured key bindings
  * 3. Enabled state of shortcuts
+ *
+ * Recognizes shortcut chords on KeyDown and executes the action on primary KeyUp.
  *
  * Usage:
  * ```kotlin
@@ -33,6 +49,20 @@ class KeymapHandler(
     private val logger = BossLogger.forComponent("KeymapHandler")
     private val matcher = KeymapMatcher(settings)
     private var _settings = settings
+    private var pendingShortcut: PendingKeymapShortcut? = null
+
+    /**
+     * Whether a shortcut chord is currently armed and pending release.
+     */
+    val hasPendingShortcut: Boolean
+        get() = pendingShortcut != null
+
+    /**
+     * Clear any pending shortcut state (e.g. on focus loss, window deactivation, or cancellation).
+     */
+    fun clearPendingShortcut() {
+        pendingShortcut = null
+    }
 
     /**
      * Current keymap settings.
@@ -45,11 +75,14 @@ class KeymapHandler(
      */
     fun updateSettings(newSettings: KeymapSettings) {
         _settings = newSettings
+        pendingShortcut = null
     }
 
     /**
      * Handle a keyboard event in the given context.
-     * Returns true if the event was handled, false otherwise.
+     * On KeyDown: Matches and arms a shortcut chord (returns true if matched/consumed without executing).
+     * On KeyUp: Executes the action when the matching primary key is released.
+     * Returns true if the event was handled/consumed, false otherwise.
      *
      * @param event The keyboard event to handle
      * @param context The current UI context
@@ -60,19 +93,63 @@ class KeymapHandler(
         context: ShortcutContext,
         executor: (actionId: String) -> Boolean,
     ): Boolean {
-        // Match the event to a binding
-        val binding = matcher.match(event, context) ?: return false
+        when (event.type) {
+            KeyEventType.KeyDown -> {
+                if (event.key in MODIFIER_ONLY_KEYS) {
+                    return false
+                }
 
-        // Execute the action
-        val handled = executor(binding.actionId)
+                // Check auto-repeat for the pending primary key
+                val currentPending = pendingShortcut
+                if (currentPending != null && currentPending.primaryKey == event.key) {
+                    return true
+                }
 
-        if (handled) {
-            logger.debug(LogCategory.UI, "Executed action", mapOf("actionId" to binding.actionId, "description" to binding.description))
-        } else {
-            logger.debug(LogCategory.UI, "Failed to execute action", mapOf("actionId" to binding.actionId))
+                // Match the event to a binding
+                val binding = matcher.match(event, context)
+                if (binding != null) {
+                    pendingShortcut = PendingKeymapShortcut(binding, event.key, context)
+                    return true
+                } else {
+                    pendingShortcut = null
+                    return false
+                }
+            }
+
+            KeyEventType.KeyUp -> {
+                val currentPending = pendingShortcut
+                if (currentPending != null) {
+                    if (event.key == currentPending.primaryKey) {
+                        pendingShortcut = null
+                        val handled = executor(currentPending.binding.actionId)
+                        if (handled) {
+                            logger.debug(
+                                LogCategory.UI,
+                                "Executed action on key release",
+                                mapOf("actionId" to currentPending.binding.actionId, "description" to currentPending.binding.description),
+                            )
+                        } else {
+                            logger.debug(
+                                LogCategory.UI,
+                                "Failed to execute action on key release",
+                                mapOf("actionId" to currentPending.binding.actionId),
+                            )
+                        }
+                        return handled
+                    } else if (event.key in MODIFIER_ONLY_KEYS) {
+                        // Releasing modifier alone cancels pending chord without invoking action
+                        pendingShortcut = null
+                        return false
+                    } else {
+                        pendingShortcut = null
+                        return false
+                    }
+                }
+                return false
+            }
+
+            else -> return false
         }
-
-        return handled
     }
 
     /**
