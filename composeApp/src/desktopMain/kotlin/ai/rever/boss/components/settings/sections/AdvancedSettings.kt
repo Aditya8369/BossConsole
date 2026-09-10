@@ -64,10 +64,7 @@ fun AdvancedSettings() {
                 onCheckedChange = { enabled ->
                     modeSaveError = null
                     coroutineScope.launch {
-                        if (writeBossMode(enabled).isSuccess) {
-                            kernelMode = enabled
-                            needsRestart = enabled != initialMode
-                        } else {
+                        if (writeBossMode(enabled).isFailure) {
                             modeSaveError = "Could not save process mode. Check preference-file permissions and logs."
                         }
                     }
