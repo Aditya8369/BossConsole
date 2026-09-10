@@ -189,7 +189,6 @@
     <ID>CyclomaticComplexMethod:UpdateUI.kt$@Composable fun UpdateSettingsSection(updateCoordinator: UpdateCoordinator = UpdateCoordinator.instance)</ID>
     <ID>CyclomaticComplexMethod:UpdateUI.kt$private fun formatTime(instant: kotlin.time.Instant): String</ID>
     <ID>CyclomaticComplexMethod:UserExistenceService.kt$UserExistenceService$suspend fun checkUserExists(email: String): Result&lt;UserExistence&gt;</ID>
-    <ID>CyclomaticComplexMethod:WizardComponents.kt$@Composable fun CheckboxCard( title: String, description: String, icon: ImageVector? = null, isChecked: Boolean, onCheckedChange: (Boolean) -&gt; Unit, enabled: Boolean = true, modifier: Modifier = Modifier, )</ID>
     <ID>CyclomaticComplexMethod:WorkspaceApplier.kt$private fun createTabFromWorkspaceConfig( tabConfig: TabConfig, projectPath: String, splitViewState: SplitViewState, ): TabInfo?</ID>
     <ID>CyclomaticComplexMethod:WorkspaceApplier.kt$private suspend fun applyWorkspaceNode( node: SplitConfig, splitViewState: SplitViewState, currentPanelId: String, projectPath: String, )</ID>
     <ID>CyclomaticComplexMethod:WorkspaceButton.kt$@Composable fun WorkspaceButton( onOpenWorkspace: (LayoutWorkspace) -&gt; Unit, workspaceManager: WorkspaceManager, getCurrentWorkspace: (() -&gt; LayoutWorkspace)? = null, onShowTopOfMind: (() -&gt; Unit)? = null, /** Sized for the vertical tab bar rather than the top bar. See BossActionButton. */ compact: Boolean = false, )</ID>
@@ -442,7 +441,6 @@
     <ID>LongMethod:VersionSelectionDialog.kt$@Composable fun VersionSelectionDialog( currentVersion: Version, versions: List&lt;VersionInfo&gt;, isLoading: Boolean, error: String? = null, onVersionSelected: (VersionInfo) -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
     <ID>LongMethod:VersionSelectionDialog.kt$@Composable private fun VersionItem( versionInfo: VersionInfo, isCurrent: Boolean, isLatest: Boolean = false, onClick: () -&gt; Unit, )</ID>
     <ID>LongMethod:WindowsDefaultBrowserHandler.kt$WindowsDefaultBrowserHandler$internal fun registerAsBrowserCandidate(): Boolean</ID>
-    <ID>LongMethod:WizardComponents.kt$@Composable fun CheckboxCard( title: String, description: String, icon: ImageVector? = null, isChecked: Boolean, onCheckedChange: (Boolean) -&gt; Unit, enabled: Boolean = true, modifier: Modifier = Modifier, )</ID>
     <ID>LongMethod:WizardComponents.kt$@Composable fun SelectionCard( title: String, description: String, icon: ImageVector? = null, isSelected: Boolean, onClick: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongMethod:WizardComponents.kt$@Composable fun WizardStepIndicator( currentStep: Int, totalSteps: Int, modifier: Modifier = Modifier, )</ID>
     <ID>LongMethod:WorkspaceApplier.kt$private suspend fun applyWorkspaceNode( node: SplitConfig, splitViewState: SplitViewState, currentPanelId: String, projectPath: String, )</ID>
