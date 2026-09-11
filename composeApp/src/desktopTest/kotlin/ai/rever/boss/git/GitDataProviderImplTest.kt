@@ -32,13 +32,24 @@ class GitDataProviderImplTest {
         temp.deleteRecursively()
     }
 
+    private fun runGitTest(block: suspend () -> Unit) =
+        runTest {
+            try {
+                block()
+            } finally {
+                activeProviders.forEach { it.dispose() }
+                activeProviders.clear()
+            }
+        }
+
     private fun createProvider(
         state: WindowGitState?,
         windowIdProvider: () -> String? = { "test-window" },
         projectPathProvider: () -> String? = { null },
-    ): GitDataProviderImpl = GitDataProviderImpl(state, windowIdProvider, projectPathProvider).also {
-        activeProviders += it
-    }
+    ): GitDataProviderImpl =
+        GitDataProviderImpl(state, windowIdProvider, projectPathProvider).also {
+            activeProviders += it
+        }
 
     private fun git(vararg args: String) {
         val process = ProcessBuilder(listOf("git", "-C", temp.absolutePath) + args).start()
@@ -61,7 +72,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusBootstrapsMissingProjectPathFromWindowProject() =
-        runTest {
+        runGitTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
             assertNull(state.projectPath.value)
@@ -78,7 +89,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusReportsARealCheckoutAsARepository() =
-        runTest {
+        runGitTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
             assertFalse(state.isGitRepository.value)
@@ -96,7 +107,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusAlignsGitsProjectPathSoFileDiffsResolve() =
-        runTest {
+        runGitTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
 
@@ -115,7 +126,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusReportsANonRepositoryAsSuch() =
-        runTest {
+        runGitTest {
             val plain =
                 java.nio.file.Files
                     .createTempDirectory("not-a-repo")
@@ -131,7 +142,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusReProbesAKnownNonRepositoryUntilItBecomesOne() =
-        runTest {
+        runGitTest {
             val plain =
                 java.nio.file.Files
                     .createTempDirectory("not-a-repo")
@@ -165,7 +176,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusStillProbesWhenThePathWasSetWithoutARefresh() =
-        runTest {
+        runGitTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
             // Same path as the selected project, written without refreshForWindow.
@@ -185,7 +196,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusFollowsTheSelectedProjectWhenItChanges() =
-        runTest {
+        runGitTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
             // A window bootstrapped on something that is not a repository - e.g. a
@@ -206,7 +217,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusKeepsAnExistingPathWhenNothingResolves() =
-        runTest {
+        runGitTest {
             dirtyRepo()
             val state = WindowGitState("test-window")
             state.setProjectPath("/some/path")
@@ -220,7 +231,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun refreshStatusWithNoResolvablePathStaysNull() =
-        runTest {
+        runGitTest {
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }, { null })
 
@@ -244,7 +255,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun branchesListsEveryLocalBranchAndMarksTheCurrentOne() =
-        runTest {
+        runGitTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
@@ -269,7 +280,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun logGraphForAnotherBranchShowsThatBranchesTipNotHeads() =
-        runTest {
+        runGitTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
@@ -284,7 +295,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun logGraphForDoesNotOverwriteTheWindowsHeadCommitLog() =
-        runTest {
+        runGitTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
@@ -301,7 +312,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun logGraphForABlankRefFallsBackToHead() =
-        runTest {
+        runGitTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
@@ -314,7 +325,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun logGraphForRefusesRefsThatWouldReadAsGitOptions() =
-        runTest {
+        runGitTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
             val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
@@ -352,7 +363,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun pushPublishesTheCurrentBranchToTheRemote() =
-        runTest {
+        runGitTest {
             val (repo, bare) = repoWithRemote()
             val (provider, _) = provider(repo)
 
@@ -373,7 +384,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun fetchThenPullBringsTheRemoteCommitDown() =
-        runTest {
+        runGitTest {
             val (repo, bare) = repoWithRemote()
             val (provider, state) = provider(repo)
             assertTrue(provider.push() is GitOperationResultData.Success)
@@ -421,7 +432,7 @@ class GitDataProviderImplTest {
 
     @Test
     fun theRemoteVerbsReportNoProjectRatherThanActingOnTheWrongOne() =
-        runTest {
+        runGitTest {
             // Window-scoped by construction: no window path means no repository to
             // act on, never "whichever repo some other window refreshed last".
             val state = WindowGitState("test-window")

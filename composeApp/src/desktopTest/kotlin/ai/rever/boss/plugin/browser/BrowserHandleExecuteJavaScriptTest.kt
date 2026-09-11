@@ -25,7 +25,7 @@ class BrowserHandleExecuteJavaScriptTest {
             try {
                 val callJob =
                     async {
-                        call.call<String>(timeoutMs = 100) {
+                        call.call<String>(timeoutMs = 500) {
                             entered.countDown()
                             release.await()
                             "late-result"
@@ -35,7 +35,7 @@ class BrowserHandleExecuteJavaScriptTest {
                 assertNull(callJob.await(), "caller timeout answers null")
                 disposal.start()
                 assertNull(
-                    withTimeoutOrNull(100) {
+                    withTimeoutOrNull(200) {
                         disposal.awaitCompletion()
                         true
                     },
