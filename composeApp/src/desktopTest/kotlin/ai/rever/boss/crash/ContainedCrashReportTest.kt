@@ -307,12 +307,11 @@ class ContainedCrashReportTest {
             // readText via runCatching: the writer thread sweeps old reports while
             // we are listing, so a file can vanish between listFiles and the read.
             val written = reports().filter { runCatching { it.readText() }.getOrDefault("").contains(text) }
-            if (written.isNotEmpty()) {
-                written.forEach { it.delete() }
-                return
-            }
+            // Windows can temporarily deny deletion too. The marker must be gone
+            // before callers assert the number of reports; otherwise keep polling.
+            if (written.isNotEmpty() && written.all { it.delete() || !it.exists() }) return
             Thread.sleep(20)
         }
-        throw AssertionError("the contained-report writer never drained")
+        throw AssertionError("the contained-report writer never drained or its marker could not be deleted")
     }
 }
