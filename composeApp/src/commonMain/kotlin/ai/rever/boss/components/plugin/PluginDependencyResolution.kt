@@ -114,11 +114,9 @@ object PluginDependencyResolution {
      * nothing at all, silently re-creating the problem this feature exists to remove.
      *
      * [isIncompatible] qualifies the **jar** clause only, and must not override LOADED.
-     * `PluginCrashRegistry` keeps the flag until something clears it, and the only caller of
-     * `clearIncompatible` is the re-enable path - not install or update. So a plugin that failed
-     * registration, was updated from the Toolbox's own "Plugin Incompatible" prompt and is now
-     * running still carries the flag; excluding it would report a *running* plugin as missing,
-     * and taking Install would then discard the download and claim it "did not start".
+     * Uninstall and re-enable clear the incompatibility marker. LOADED remains authoritative
+     * even if a stale marker is observed across a lifecycle transition: reporting a running
+     * plugin as missing would discard a redundant download and claim it did not start.
      *
      * The jar clause needs [isIncompatible] to stay honest. There are **two** binary
      * incompatibility paths in `installPlugin` and only one of them fails: the load-time one

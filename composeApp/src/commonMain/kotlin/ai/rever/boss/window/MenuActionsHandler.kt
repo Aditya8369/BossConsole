@@ -739,6 +739,14 @@ object MenuActionsHandler {
         _reloadAllPluginsEvents.tryEmit(windowId)
     }
 
+    private val _showPluginHealthCenterEvents = MutableSharedFlow<String>(extraBufferCapacity = 10)
+    val showPluginHealthCenterEvents: SharedFlow<String> = _showPluginHealthCenterEvents.asSharedFlow()
+
+    /** Open the host-owned Plugin Health & Recovery Center for one window. */
+    fun triggerShowPluginHealthCenter(windowId: String) {
+        _showPluginHealthCenterEvents.tryEmit(windowId)
+    }
+
     /**
      * Trigger the "Reload Panel" action for a specific panel in the specified window. Despite the
      * menu's wording this reloads the owning plugin's jar and resets its slots in every window.

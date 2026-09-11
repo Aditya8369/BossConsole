@@ -617,6 +617,13 @@ internal fun BossAppMenuActionEffects(
             }.launchIn(this)
     }
 
+    LaunchedEffect(windowId) {
+        MenuActionsHandler.showPluginHealthCenterEvents
+            .onEach { eventWindowId ->
+                if (eventWindowId == windowId) state.showPluginHealthCenter = true
+            }.launchIn(this)
+    }
+
     // Handle "Reload Panel" (by panel ID) menu events, which reload the owning plugin
     LaunchedEffect(windowId) {
         MenuActionsHandler.reloadPluginEvents

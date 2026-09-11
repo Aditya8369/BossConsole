@@ -27,6 +27,7 @@ import ai.rever.boss.components.plugin.MissingHandlerPluginDialog
 import ai.rever.boss.components.plugin.MissingHandlerPluginEventBus
 import ai.rever.boss.components.plugin.PanelIds
 import ai.rever.boss.components.plugin.PluginDependencyEventBus
+import ai.rever.boss.components.plugin.PluginHealthCenterDialog
 import ai.rever.boss.components.plugin.PluginLoadGateHost
 import ai.rever.boss.components.plugin.PluginLoadRemedyAccess
 import ai.rever.boss.components.plugin.PluginStoreVersionBridge
@@ -52,6 +53,7 @@ import ai.rever.boss.mcp.McpToolRegistryImpl
 import ai.rever.boss.platform.rememberDirectoryPicker
 import ai.rever.boss.plugin.api.Panel.Companion.left
 import ai.rever.boss.plugin.api.Panel.Companion.top
+import ai.rever.boss.plugin.api.PluginLoaderDelegate
 import ai.rever.boss.plugin.api.TabInfo
 import ai.rever.boss.plugin.sandbox.notification.ToastMessage
 import ai.rever.boss.plugin.sandbox.notification.ToastType
@@ -459,6 +461,14 @@ internal fun BossAppDialogs(state: BossAppState) {
         // In the MAIN composition, not inside whichever chrome raised it - see BossAppState.
         state.draggablePanelComponent.ToolLauncherDialog(
             onDismiss = { state.showToolLauncherDialog = false },
+        )
+    }
+
+    if (state.showPluginHealthCenter) {
+        PluginHealthCenterDialog(
+            manager = state.currentDefaultPlugin?.dynamicPluginManager,
+            delegate = state.currentDefaultPlugin?.getPluginAPI(PluginLoaderDelegate::class.java),
+            onDismiss = { state.showPluginHealthCenter = false },
         )
     }
 

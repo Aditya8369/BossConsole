@@ -1048,6 +1048,13 @@ fun ApplicationScope.BossWindow(
                     },
                 )
 
+                Item(
+                    "Plugin Health & Recovery...",
+                    onClick = {
+                        MenuActionsHandler.triggerShowPluginHealthCenter(windowState.id)
+                    },
+                )
+
                 // Debug: Test crash reporter (Issue #543)
                 // This crashes during Compose composition to properly test the separate window crash dialog
                 Separator()
