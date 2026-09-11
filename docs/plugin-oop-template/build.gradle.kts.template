@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.kotlinSerialization)
     // Shadow plugin for creating fat JARs
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.1.0"
 }
 
 group = "ai.rever.boss.plugin.sample"
@@ -23,7 +23,7 @@ java {
 }
 
 dependencies {
-    // Plugin API and IPC (provided by host runtime — don't bundle)
+    // Plugin API and IPC (provided by host runtime - don't bundle)
     compileOnly(project(":plugin-platform:plugin-api-core"))
     compileOnly(project(":boss-ipc"))
     compileOnly(project(":boss-ui-sdk"))
@@ -41,16 +41,14 @@ tasks.shadowJar {
     archiveClassifier.set("all")
     mergeServiceFiles()
 
+    // The child's entry point (PluginProcessMainKt) lives in the standalone
+    // boss-microkernel-runtime JAR (separate repository). The host adds that
+    // jar to the child classpath at spawn time (BOSS_PLUGIN_RUNTIME_JAR or the
+    // probed default location), so do NOT bundle it here. For standalone
+    // debugging, keep it out of the shadow JAR and add it to the -cp line:
+    //   compileOnly(files("libs/boss-microkernel-runtime-<version>.jar"))
     manifest {
         attributes["Main-Class"] = "ai.rever.boss.plugin.runtime.PluginProcessMainKt"
-    }
-
-    // Exclude API and host runtime jars (provided by host runtime at runtime)
-    dependencies {
-        exclude(dependency("ai.rever.boss.plugin:plugin-api-core"))
-        exclude(dependency("ai.rever.boss:boss-ipc"))
-        exclude(dependency("ai.rever.boss:boss-ui-sdk"))
-        exclude(dependency("ai.rever.boss.microkernel.runtime:boss-microkernel-runtime"))
     }
 }
 

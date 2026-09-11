@@ -61,14 +61,13 @@ graph LR
 ### Core IPC Services (`boss.ipc.v1`)
 
 1. **`KernelService` (`kernel.proto`)** *(Hosted by Kernel)*:
-   - Process registration handshake (`RegisterProcessRequest` / `RegisterProcessResponse`).
-   - Liveness heartbeat polling stream (`HeartbeatPing` / `HeartbeatPong`).
-   - Service address directory discovery.
+   - Process registration handshake (`RegisterProcessRequest` / `RegisterProcessResponse`). Other processes' service addresses ride in `RegisterProcessResponse.service_addresses`; there is no separate directory-lookup RPC.
+   - Liveness heartbeat stream `Heartbeat`: the child sends `HeartbeatPing` (optionally carrying `ProcessHealthMetrics`), and the kernel answers each ping with `HeartbeatPong`.
 
 2. **`PluginUIService` (`ui_protocol.proto`)** *(Hosted by Kernel)*:
    - The plugin process acts as the gRPC **client**, dialing the Kernel's `PluginUIService`.
    - Plugin calls `RegisterUI` with initial `WidgetTree` layout and metadata.
-   - Plugin opens bidirectional `StreamUI` call: streams `WidgetUpdate` (full tree or incremental `WidgetPatch`) to Kernel, and reads incoming `UIEvent` (clicks, text input, checkbox toggles, keystrokes) streamed from Kernel Compose UI.
+   - Plugin opens bidirectional `StreamUI` call: streams `WidgetUpdate` (a full `WidgetTree` or an incremental `WidgetDiff`) to Kernel, and reads incoming `UIEvent` (clicks, text input, checkbox toggles, keystrokes) streamed from Kernel Compose UI.
 
 3. **`PluginStateService` (`plugin_state.proto`)** *(Hosted by Child Plugin Process)*:
    - Child process runs local `BossIpcServer` on `BOSS_IPC_ADDR`.
@@ -94,10 +93,10 @@ sequenceDiagram
     participant Host as Host (OutOfProcessPluginSpawnerImpl)
     participant Kernel as Kernel Registry & UIService
     participant Child as Plugin Child Process
-    
+
     Host->>Child: Spawn JVM process (passes BOSS_KERNEL_IPC_ADDR, BOSS_IPC_ADDR, BOSS_PROCESS_TOKEN, etc.)
     Child->>Kernel: Connect & Register (KernelService.RegisterProcess)
-    Child->>Kernel: Start Heartbeat Stream (KernelService.heartbeat)
+    Child->>Kernel: Start Heartbeat Stream (KernelService.Heartbeat)
     Child->>Child: Start local gRPC server on BOSS_IPC_ADDR (PluginStateService)
     Child->>Kernel: Optional: register UI surface & Stream UI (explicit remote widget surface)
     Host->>Kernel: Wait for child readiness in ProcessRegistry (startupTimeoutMs)
@@ -116,7 +115,7 @@ sequenceDiagram
 1. **Spawn**: `OutOfProcessPluginSpawnerImpl.spawn()` builds the classpath (`runtimeClasspath` + `jarPath` + the resolved API JAR), sets JVM flags (heap bounds, `-Dboss.api.version`), passes environment variables, and launches via `ProcessSpawner`.
 2. **Registration Handshake**: `ChildProcessBootstrap` in the child connects to `BOSS_KERNEL_IPC_ADDR` with `BOSS_PROCESS_TOKEN` authentication metadata, registers process ID and IPC listening address via `KernelService.RegisterProcess`.
 3. **Readiness Gate**: Host awaits child registration up to `startupTimeoutMs` (default: 30s). If the timeout expires, `cleanupFailedSpawn` forcibly kills the orphaned child. Registration occurs before runtime state-holder initialization, so it is not proof that state sync or UI is usable. The manager launches spawning in the background and logs a failure while the plugin can remain `LOADED`. Current dev scopes process IDs by window and uses the process ID as the state instance ID; plugin identity remains separate.
-4. **Heartbeat & Monitoring**: The host config defaults `heartbeatIntervalMs` to 5s. Plugin children are excluded from the global health supervisor, so `RestartPolicy.ON_FAILURE` and `maxRestartAttempts` do not imply automatic plugin restart. See `KernelBootstrap` and the plugin-specific monitoring/recovery path. The standalone runtime currently advertises its own fixed 5s heartbeat and 30s startup contract.
+4. **Heartbeat & Monitoring**: The host config defaults `heartbeatIntervalMs` to 5s. Plugin children are excluded from the global health supervisor, so `RestartPolicy.ON_FAILURE` and `maxRestartAttempts` do not imply automatic plugin restart. See `KernelBootstrap` and the plugin-specific monitoring/recovery path. The standalone runtime currently advertises its own fixed 5s heartbeat and 30s startup contract. The kernel records each ping's timestamp and optional metrics (`GetProcessStatus` / `ListProcesses` expose the last metrics), but no supervision path consults the records — `KernelServiceImpl.isHeartbeatTimedOut` has no callers — so a wedged-but-alive child is invisible to the host until it exits.
 5. **UI & State Binding**: A plugin that wants host-rendered remote UI registers its surface on the Kernel `PluginUIService` and starts streaming widgets; the host connects `PluginStateBridge` to the child's `PluginStateService` on `BOSS_IPC_ADDR` for intents and state sync.
 6. **Teardown**: Host shuts down state bridge, closes gRPC channels (graceful 3-second wait, then `shutdownNow`), signals child termination (5-second graceful exit before `destroyForcibly`), and unregisters from `ProcessRegistry`.
 
@@ -167,8 +166,9 @@ Declare `"isolationMode": "out-of-process"` in your plugin's `plugin.json`:
 Notes on the manifest:
 
 - The host parses `plugin.json` with `ignoreUnknownKeys = true`: unknown keys are silently ignored, not an error.
-- There is no `fallback` manifest key and no `stateHolderClass` manifest key. When no spawner is available, `DynamicPluginManager` decides on in-process fallback on its own.
-- `panel` uses `location` (`side.slot.position`), `icon` (Material icon name), `order`, `panelId`, and `displayName`. Keys such as `defaultSlot` or `iconName` are ignored.
+- There is no `fallback` manifest key: when no spawner is available, `DynamicPluginManager` decides on in-process fallback on its own.
+- `stateHolderClass` is not read by the host; the standalone runtime reads it from the plugin manifest and instantiates the child's state holder from it (see the standalone runtime entry under Source references). Declare it only when your state holder satisfies the runtime's state-holder contract.
+- `panel` is parsed into the pinned API's `PluginPanelConfig`: `location` (dot-separated `side.slot.position`, e.g. `left.top.bottom`), `icon` (Material icon name), `order`, `panelId` (defaults to `{pluginId}-panel`), and `displayName` (defaults to the plugin's display name). The host's in-repo loader does not use this block to place panels — panels register through `PluginContext.panelRegistry` in the plugin's `register()`. Keys such as `defaultSlot` or `iconName` are ignored.
 
 ### Step 2: Build Configuration (`build.gradle.kts`)
 
@@ -178,7 +178,7 @@ OOP plugins are packaged as fat shadow JARs containing the plugin code and its p
 plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.kotlinSerialization)
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.1.0"
 }
 
 group = "ai.rever.boss.plugin.sample"
@@ -209,15 +209,10 @@ tasks.shadowJar {
         attributes["Main-Class"] = "ai.rever.boss.plugin.runtime.PluginProcessMainKt"
     }
 
-    // Exclude API and host runtime modules already provided by the host environment
-    dependencies {
-        exclude(dependency("ai.rever.boss.plugin:plugin-api-core"))
-        exclude(dependency("ai.rever.boss:boss-ipc"))
-        exclude(dependency("ai.rever.boss:boss-ui-sdk"))
-        exclude(dependency("ai.rever.boss.microkernel.runtime:boss-microkernel-runtime"))
-    }
 }
 ```
+
+The three `compileOnly` dependencies are never bundled: shadowJar packages the runtime classpath and `compileOnly` is not part of it, so no `exclude(...)` entries are needed. The standalone runtime JAR (where the `Main-Class` lives) is likewise not bundled here — the host adds it to the child classpath at spawn time (see the `BOSS_PLUGIN_RUNTIME_JAR` row in the section 6 table).
 
 > **Note on Gradle Module Paths**: When building inside the BOSS Console repository, microkernel modules live in `modules/` but use flat Gradle project paths: `:boss-ipc` and `:boss-ui-sdk` (not `:modules:boss-ipc`). `boss-microkernel-runtime` is a standalone repository, not a BossConsole Gradle subproject: a complete recipe must resolve a matching runtime and contract artifact for the child classpath (runtime JAR, plugin JAR, then the resolved API JAR) and package the plugin manifest at `META-INF/boss-plugin/plugin.json`. Keep the API version aligned with the host pin in `gradle/libs.versions.toml`; do not substitute an old API JAR. A ready-to-copy variant lives in [`plugin-oop-template/build.gradle.kts.template`](plugin-oop-template/build.gradle.kts.template).
 
@@ -298,8 +293,10 @@ When running or debugging an OOP plugin process (either spawned by host or execu
 | `BOSS_IPC_ADDR` | Env Var | Child process's own gRPC server bind address (e.g. `localhost:50052`) |
 | `BOSS_PLUGIN_CLASSPATH` | Env Var | Path to the plugin's fat shadow JAR |
 | `BOSS_PROCESS_TOKEN` | Env Var | IPC security token minted by the host kernel (required for authenticated remote UI) |
+| `BOSS_PLUGIN_ID` | Env Var | Plugin identity set by the spawner; the host recovers the plugin ID from process metadata via this variable |
 | `BOSS_PROJECT_PATH` | Env Var | Active project root directory |
 | `BOSS_WINDOW_ID` | Env Var | ID of the host window hosting the panel/tab |
+| `BOSS_PLUGIN_RUNTIME_JAR` | Env Var (host-side) | Path to the standalone `boss-microkernel-runtime` JAR the host prepends to the child classpath; a default location is probed when unset |
 | `-Dboss.api.version` | JVM Arg | Target API version (e.g. `-Dboss.api.version=1.0.0`) |
 | `-Xmx512m -Xms64m` | JVM Arg | Process heap allocation bounds |
 
@@ -328,6 +325,13 @@ java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 \
 Use `WidgetDiffEngine` directly in unit tests to assert UI tree generation and diff delta calculations without spinning up a gRPC server:
 
 ```kotlin
+import ai.rever.boss.ui.sdk.DiffOperation
+import ai.rever.boss.ui.sdk.WidgetDiffEngine
+import ai.rever.boss.ui.sdk.WidgetType
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
 class SampleStateHolderTest {
     @Test
     fun testWidgetTreeGenerationAndDiff() {
