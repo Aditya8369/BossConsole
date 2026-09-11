@@ -23,10 +23,21 @@ import kotlin.test.assertTrue
  */
 class GitDataProviderImplTest {
     private val temp = File(System.getProperty("java.io.tmpdir"), "boss-git-provider-${hashCode()}")
+    private val activeProviders = mutableListOf<GitDataProviderImpl>()
 
     @AfterTest
     fun cleanup() {
+        activeProviders.forEach { it.dispose() }
+        activeProviders.clear()
         temp.deleteRecursively()
+    }
+
+    private fun createProvider(
+        state: WindowGitState?,
+        windowIdProvider: () -> String? = { "test-window" },
+        projectPathProvider: () -> String? = { null },
+    ): GitDataProviderImpl = GitDataProviderImpl(state, windowIdProvider, projectPathProvider).also {
+        activeProviders += it
     }
 
     private fun git(vararg args: String) {
@@ -55,7 +66,7 @@ class GitDataProviderImplTest {
             val state = WindowGitState("test-window")
             assertNull(state.projectPath.value)
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
             provider.refreshStatus()
 
             assertEquals(repo.absolutePath, state.projectPath.value)
@@ -72,7 +83,7 @@ class GitDataProviderImplTest {
             val state = WindowGitState("test-window")
             assertFalse(state.isGitRepository.value)
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
             provider.refreshStatus()
 
             // Only GitService.refreshForWindow writes these; nothing on the
@@ -89,7 +100,7 @@ class GitDataProviderImplTest {
             val repo = dirtyRepo()
             val state = WindowGitState("test-window")
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
             provider.refreshStatus()
 
             // getFileDiff / getCommitDiff / getRefDiff read git's global project
@@ -111,7 +122,7 @@ class GitDataProviderImplTest {
                     .toFile()
             val state = WindowGitState("test-window")
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { plain.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { plain.absolutePath }
             provider.refreshStatus()
 
             assertFalse(state.isGitRepository.value)
@@ -126,7 +137,7 @@ class GitDataProviderImplTest {
                     .createTempDirectory("not-a-repo")
                     .toFile()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { plain.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { plain.absolutePath }
 
             provider.refreshStatus()
             assertFalse(state.isGitRepository.value)
@@ -163,7 +174,7 @@ class GitDataProviderImplTest {
             state.setProjectPath(repo.absolutePath)
             assertFalse(state.isGitRepository.value)
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
             provider.refreshStatus()
 
             assertTrue(
@@ -183,7 +194,7 @@ class GitDataProviderImplTest {
             // switched to a project that has one.
             state.setProjectPath("/definitely/not/a/repo")
 
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
             provider.refreshStatus()
 
             assertEquals(repo.absolutePath, state.projectPath.value)
@@ -201,7 +212,7 @@ class GitDataProviderImplTest {
             state.setProjectPath("/some/path")
 
             // A blank provider result means "not resolved yet", not "no project".
-            val provider = GitDataProviderImpl(state, { "test-window" }) { null }
+            val provider = createProvider(state, { "test-window" }) { null }
             provider.refreshStatus()
 
             assertEquals("/some/path", state.projectPath.value)
@@ -211,7 +222,7 @@ class GitDataProviderImplTest {
     fun refreshStatusWithNoResolvablePathStaysNull() =
         runTest {
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }, { null })
+            val provider = createProvider(state, { "test-window" }, { null })
 
             provider.refreshStatus()
 
@@ -236,7 +247,7 @@ class GitDataProviderImplTest {
         runTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
 
             val branches = provider.branches()
 
@@ -261,7 +272,7 @@ class GitDataProviderImplTest {
         runTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
 
             val head = provider.logGraph(50)
             val side = provider.logGraphFor("side", 50)
@@ -276,7 +287,7 @@ class GitDataProviderImplTest {
         runTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
 
             provider.logGraph(50)
             val headLog = state.commitLog.value.map { it.subject }
@@ -293,7 +304,7 @@ class GitDataProviderImplTest {
         runTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
 
             assertEquals(
                 provider.logGraph(50).map { it.hash },
@@ -306,7 +317,7 @@ class GitDataProviderImplTest {
         runTest {
             val repo = branchedRepo()
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }) { repo.absolutePath }
+            val provider = createProvider(state, { "test-window" }) { repo.absolutePath }
 
             // The picker only ever feeds names git produced, but the value crosses
             // the plugin API boundary, so it is validated rather than trusted.
@@ -336,7 +347,7 @@ class GitDataProviderImplTest {
 
     private fun provider(repo: File): Pair<GitDataProviderImpl, WindowGitState> {
         val state = WindowGitState("test-window")
-        return GitDataProviderImpl(state, { "test-window" }, { repo.absolutePath }) to state
+        return createProvider(state, { "test-window" }, { repo.absolutePath }) to state
     }
 
     @Test
@@ -414,7 +425,7 @@ class GitDataProviderImplTest {
             // Window-scoped by construction: no window path means no repository to
             // act on, never "whichever repo some other window refreshed last".
             val state = WindowGitState("test-window")
-            val provider = GitDataProviderImpl(state, { "test-window" }, { null })
+            val provider = createProvider(state, { "test-window" }, { null })
 
             assertTrue(provider.fetch() is GitOperationResultData.Error)
             assertTrue(provider.pull() is GitOperationResultData.Error)
