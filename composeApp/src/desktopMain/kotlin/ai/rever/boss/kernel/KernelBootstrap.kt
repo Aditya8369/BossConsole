@@ -867,8 +867,12 @@ class KernelBootstrap(
 
         val summary = serviceStartupSummary(spawnedCount, missingJars, failedSpawns)
         logger.info(summary)
-        ai.rever.boss.startup.kernelStartupNotices
-            .report(summary, source = ai.rever.boss.startup.STARTUP_NOTICE_SOURCE)
+        // A healthy spawn is logged, not toasted: only missing JARs or failed spawns are
+        // startup news for the user (BossConsole#450's review).
+        if (serviceStartupSummaryNeedsNotice(missingJars, failedSpawns)) {
+            ai.rever.boss.startup.kernelStartupNotices
+                .report(summary, source = ai.rever.boss.startup.STARTUP_NOTICE_SOURCE)
+        }
     }
 
     /**

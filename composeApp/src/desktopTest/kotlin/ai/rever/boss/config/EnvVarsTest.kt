@@ -11,6 +11,19 @@ class EnvVarsTest {
     }
 
     @Test
+    fun `export-prefixed lines are read as their bare key`() {
+        // Shell convention, allowed because env_vars doubles as the secret-manager plugin's
+        // key file. The settings reader recognised this line long before the ConfigLoader
+        // reader did - that split is what BossConsole#450's review asked to close.
+        assertEquals("KERNEL", parseEnvVars(listOf("export BOSS_MODE=KERNEL")).getProperty("BOSS_MODE"))
+    }
+
+    @Test
+    fun `indented comment lines are comments in the ConfigLoader reader too`() {
+        assertEquals(null, parseEnvVars(listOf("  # BOSS_MODE=KERNEL")).getProperty("BOSS_MODE"))
+    }
+
+    @Test
     fun `parser ignores malformed and blank entries and preserves embedded equals`() {
         val values = parseEnvVars(listOf("bad", "=bad", "BOSS_MODE= ", " A = first ", "A=value=tail"))
         assertEquals(1, values.size)

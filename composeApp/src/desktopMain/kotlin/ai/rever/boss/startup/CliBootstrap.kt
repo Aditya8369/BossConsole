@@ -126,6 +126,14 @@ object CliBootstrap {
                     link = link,
                     send = { attempt ->
                         val accepted = send(link, DeepLinkOrigin.EXTERNAL)
+                        // dev's per-attempt positive confirmation - the auth deep-link path is
+                        // where it was most used during sign-in debugging (BossConsole#450's
+                        // review: the extraction dropped it, leaving only the failure WARN).
+                        logger.info(
+                            LogCategory.SYSTEM,
+                            "Open request forwarding completed",
+                            mapOf("attempt" to attempt, "accepted" to accepted),
+                        )
                         if (!accepted) {
                             logger.warn(LogCategory.SYSTEM, "Failed to send URL", mapOf("attempt" to attempt))
                         }

@@ -48,7 +48,15 @@ object ConfigLoader {
                     mapOf("count" to envVarsProperties.size.toString()),
                 )
             }
-        } catch (e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
+            // Widen past Exception: BossDirectories is another class, and an
+            // ExceptionInInitializerError or NoClassDefFoundError from its own static init
+            // would escape this catch, escape ConfigLoader's <clinit>, and make every later
+            // getConfig call - including the ones before any window exists - throw
+            // NoClassDefFoundError permanently. A missing saved preference must never take
+            // the whole config loader down (BossConsole#450's review).
             logger.warn(LogCategory.SYSTEM, "Could not load env_vars", error = e)
         }
     }
