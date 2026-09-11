@@ -1,3 +1,5 @@
+import io.gitlab.arturbosch.detekt.Detekt
+import io.gitlab.arturbosch.detekt.DetektCreateBaselineTask
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
@@ -52,7 +54,10 @@ allprojects {
         parallel = true
     }
 
-    tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    tasks.withType<Detekt>().configureEach {
+        jvmTarget = "17"
+    }
+    tasks.withType<DetektCreateBaselineTask>().configureEach {
         jvmTarget = "17"
     }
 

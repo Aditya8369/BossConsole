@@ -1,5 +1,6 @@
 package ai.rever.boss.components.settings.sections
 
+import ai.rever.boss.components.dialogs.ConfirmationDialog
 import ai.rever.boss.components.settings.shared.SettingsSection
 import ai.rever.boss.components.settings.shared.SettingsSlider
 import ai.rever.boss.components.settings.shared.SettingsTheme.AccentColor
@@ -7,6 +8,11 @@ import ai.rever.boss.components.settings.shared.SettingsTheme.TextPrimary
 import ai.rever.boss.components.settings.shared.SettingsTheme.TextSecondary
 import ai.rever.boss.components.settings.shared.SettingsToggle
 import ai.rever.boss.performance.PerformanceSettingsManager
+import ai.rever.boss.plugin.ui.BossTheme
+import ai.rever.boss.settings.MICROKERNEL_MODE_CONFIRMATION_MESSAGE
+import ai.rever.boss.settings.MicrokernelModeConfirmation
+import ai.rever.boss.settings.MicrokernelModePreference
+import ai.rever.boss.settings.needsMicrokernelModeConfirmation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Card
@@ -16,43 +22,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
+@Suppress("LongMethod") // Declarative Compose layout.
 fun AdvancedSettings() {
     val coroutineScope = rememberCoroutineScope()
 
-    // Show the next-launch choice while retaining the running mode for the restart indicator.
-    val modeOverride =
-        remember {
-            ai.rever.boss.config
-                .bossModeOverrideSource()
-        }
-    var modeAvailable by remember { mutableStateOf(false) }
-    var modeLoaded by remember { mutableStateOf(false) }
-    val modeRevision by ai.rever.boss.config.savedBossModeChanges
-        .collectAsState()
-    var kernelMode by remember { mutableStateOf(false) }
-    var needsRestart by remember { mutableStateOf(false) }
-    val initialMode =
-        remember {
-            ai.rever.boss.config.ConfigLoader
-                .getConfig("BOSS_MODE") == "KERNEL"
-        }
-    var modeSaveError by remember { mutableStateOf<String?>(null) }
+    val saveState by MicrokernelModePreference.saveState.collectAsState()
+    val kernelMode = saveState.enabled ?: false
+    val needsRestart = saveState.needsRestart
+    val saveError = saveState.saveFailed
+    val readError = saveState.readFailed
+    val confirmation = remember { MicrokernelModeConfirmation() }
 
-    LaunchedEffect(modeRevision) {
-        val mode = readBossMode()
-        modeAvailable =
-            withContext(Dispatchers.IO) {
-                ai.rever.boss.config
-                    .kernelModeAvailable()
-            }
-        modeLoaded = true
-        kernelMode = mode
-        needsRestart = mode != initialMode
+    LaunchedEffect(Unit) { MicrokernelModePreference.refresh() }
+
+    fun applyMicrokernelMode(enabled: Boolean) {
+        coroutineScope.launch { MicrokernelModePreference.save(enabled) }
+    }
+
+    if (confirmation.pending) {
+        // No confirmColor override - both entry points take ConfirmationDialog's own default
+        // (BossTheme.colors.alert) rather than each naming a color that can drift from the
+        // other's, which is what let this button show blue here and red from the menu.
+        ConfirmationDialog(
+            title = "Enable experimental Microkernel Mode?",
+            message = MICROKERNEL_MODE_CONFIRMATION_MESSAGE,
+            confirmText = "Enable experimental mode",
+            onDismiss = { confirmation.cancel() },
+            onConfirm = { confirmation.confirm { applyMicrokernelMode(true) } },
+        )
     }
 
     Column(
@@ -63,27 +63,48 @@ fun AdvancedSettings() {
             SettingsToggle(
                 label = "Microkernel Mode",
                 checked = kernelMode,
+                enabled = saveState.enabled != null,
                 onCheckedChange = { enabled ->
-                    modeSaveError = null
-                    coroutineScope.launch {
-                        if (writeBossMode(enabled).isFailure) {
-                            modeSaveError = "Could not save process mode. Check preference-file permissions and logs."
-                        }
+                    if (needsMicrokernelModeConfirmation(currentlyEnabled = kernelMode, nextEnabled = enabled)) {
+                        confirmation.request()
+                    } else {
+                        applyMicrokernelMode(enabled)
                     }
                 },
                 enabled = modeLoaded && modeOverride == null && modeAvailable,
                 description = processModeDescription(modeLoaded, modeAvailable, modeOverride),
             )
 
-            modeSaveError?.let { message ->
-                Text(
-                    text = message,
-                    color = ai.rever.boss.plugin.ui.BossTheme.colors.alert,
-                    fontSize = 11.sp,
-                )
+            if (saveError || readError) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = BossTheme.colors.alert.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp),
+                    elevation = 0.dp,
+                ) {
+                    Text(
+                        // Distinct messages, not one reworded flag (BossConsole#481 review): a
+                        // read failure never attempted a write, so "check that BOSS can write" is
+                        // actively wrong advice for it, and on a first-ever refresh failing this
+                        // way the toggle above is also disabled - there is nothing to retry from
+                        // this surface until some other window's refresh happens to succeed.
+                        text =
+                            if (readError) {
+                                "Could not read the Microkernel Mode preference. It may become available " +
+                                    "once BOSS can read its config directory."
+                            } else {
+                                "Could not save Microkernel Mode. Check that BOSS can write to its config directory."
+                            },
+                        fontSize = 11.sp,
+                        color = BossTheme.colors.alert,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
             }
 
-            if (needsRestart && modeAvailable) {
+            if (needsRestart) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -209,27 +230,3 @@ fun AdvancedSettings() {
         }
     }
 }
-
-private suspend fun readBossMode(): Boolean =
-    withContext(Dispatchers.IO) {
-        ai.rever.boss.config.ConfigLoader
-            .bossModeForNextLaunch() == "KERNEL"
-    }
-
-private suspend fun writeBossMode(enabled: Boolean) =
-    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-        ai.rever.boss.config
-            .saveBossMode(enabled)
-    }
-
-private fun processModeDescription(
-    loaded: Boolean,
-    available: Boolean,
-    overrideSource: String?,
-): String =
-    when {
-        !loaded -> "Loading process mode…"
-        !available -> "Microkernel mode is unavailable in this build."
-        overrideSource != null -> "Controlled by $overrideSource"
-        else -> "Run plugins in isolated processes with gRPC IPC and AI self-healing"
-    }
