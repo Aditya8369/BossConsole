@@ -573,7 +573,27 @@ server has already decrypted, recovery codes, and JWT claim sets. The request di
 counts too: `SupabaseDataProviderImpl.rpc` parses caller-supplied parameters, and a plugin
 calling `create_secret` puts the new password in them.
 
-## Code Quality
+## Microkernel Mode's toggle is a preference, not an activation switch
+
+`Settings > Advanced` and the application menu both let an operator turn Microkernel Mode on,
+persisted to `~/.boss/env_vars` as `BOSS_MODE=KERNEL` by `MicrokernelModePreference`. Nothing in
+the host reads that file back into a running process - `env_vars` is where the secret-manager
+plugin resolves API keys from, and where this toggle happens to also live, but no
+`ConfigLoader`/`System.getenv` path in this repo loads `BOSS_MODE` from it. So the toggle and its
+"restart required" notice are exactly what they say: a **preference** for the next launch to pick
+up, not something that activates anything in the current process. Whether a launch actually starts
+in KERNEL mode, and whether that mode works, is #391's and #485's territory, not this file's.
+
+**The "restart required" comparand must be a latched startup snapshot, never a live read.**
+`ConfigLoader.getConfig("BOSS_MODE")` looks like the right thing to compare a freshly-saved value
+against and is not: it resolves from an env var, a system property, `local.properties`, or the
+embedded build config - never from `env_vars` - so on an ordinary install it is permanently `false`
+and a comparison against it can never clear after an actual restart (or can never appear at all for
+an operator who sets `BOSS_MODE` some other way). `MicrokernelModePreference.startupEnabledLatched`
+exists for exactly this: it is set once, from the first `refresh()` a process makes, and never
+moved again, so it is "what `env_vars` said when this process started" - the only comparand that
+answers "does this need a restart" correctly. Reinstating a live `ConfigLoader` read here is the
+same regression that motivated this file in the first place; see BossConsole#472's review.
 
 - Use Compose Multiplatform Resource API (not Android resources)
 - Location: `composeApp/src/commonMain/composeResources/`

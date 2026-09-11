@@ -99,6 +99,12 @@ object MenuActionsHandler {
     private val _openSettingsEvents = MutableSharedFlow<Pair<String, String?>>(extraBufferCapacity = 10)
     val openSettingsEvents: SharedFlow<Pair<String, String?>> = _openSettingsEvents.asSharedFlow()
 
+    // The application-menu "Microkernel Mode" checkbox cannot host a dialog itself - a Menu{}
+    // block is not a real composition surface. An explicit off-to-on request instead carries here
+    // for the main window's own compose tree to show the confirmation (BossConsole#472).
+    private val _confirmMicrokernelModeEvents = MutableSharedFlow<String>(extraBufferCapacity = 10)
+    val confirmMicrokernelModeEvents: SharedFlow<String> = _confirmMicrokernelModeEvents.asSharedFlow()
+
     private val _toggleFocusModeEvents = MutableSharedFlow<String>(extraBufferCapacity = 10)
     val toggleFocusModeEvents: SharedFlow<String> = _toggleFocusModeEvents.asSharedFlow()
 
@@ -448,6 +454,17 @@ object MenuActionsHandler {
         section: String? = null,
     ) {
         _openSettingsEvents.tryEmit(windowId to section)
+    }
+
+    /**
+     * Ask the window at [windowId] to show the Microkernel Mode confirmation dialog.
+     *
+     * Raised by the application-menu checkbox item on an explicit off-to-on request only - the
+     * menu item still writes the preference directly for an on-to-off request, which needs no
+     * confirmation (BossConsole#472).
+     */
+    fun triggerConfirmMicrokernelMode(windowId: String) {
+        _confirmMicrokernelModeEvents.tryEmit(windowId)
     }
 
     /**
