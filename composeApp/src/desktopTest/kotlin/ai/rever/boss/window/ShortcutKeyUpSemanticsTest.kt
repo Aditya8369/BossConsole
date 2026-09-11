@@ -388,26 +388,7 @@ class ShortcutKeyUpSemanticsTest {
     fun `plugin defaults and rebinds invoke once and unregistering closes the gate`() {
         val action = "plugin.shortcut-review.run"
         var calls = 0
-        val provider =
-            object : ShortcutActionProvider {
-                override val providerId = "shortcut-review"
-
-                override fun shortcuts() =
-                    listOf(
-                        PluginShortcutSpec(
-                            action,
-                            "Test shortcut",
-                            defaultBinding = KeyChordSpec("K", setOf("Cmd")),
-                        ),
-                    )
-
-                override fun onAction(
-                    actionId: String,
-                    windowId: String?,
-                ) {
-                    calls++
-                }
-            }
+        val provider = shortcutProvider(action) { calls++ }
         PluginShortcutRegistryImpl.register(provider)
         try {
             for (rebound in listOf(false, true)) {
@@ -424,47 +405,59 @@ class ShortcutKeyUpSemanticsTest {
                 repeat(3) {
                     assertTrue(
                         dispatchKeyEvent(
-                            KeyEvent(
-                                canvas,
-                                KeyEvent.KEY_PRESSED,
-                                0,
-                                primaryModifierMask,
-                                KeyEvent.VK_K,
-                                'K',
-                            ),
+                            pluginKeyEvent(KeyEvent.KEY_PRESSED),
                         ),
                     )
                 }
                 assertEquals(if (rebound) 1 else 0, calls)
                 assertTrue(
                     dispatchKeyEvent(
-                        KeyEvent(
-                            canvas,
-                            KeyEvent.KEY_RELEASED,
-                            0,
-                            primaryModifierMask,
-                            KeyEvent.VK_K,
-                            'K',
-                        ),
+                        pluginKeyEvent(KeyEvent.KEY_RELEASED),
                     ),
                 )
             }
             assertEquals(2, calls)
             assertTrue(
-                dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')),
+                dispatchKeyEvent(pluginKeyEvent(KeyEvent.KEY_PRESSED)),
             )
             PluginShortcutRegistryImpl.unregister(provider.providerId)
             assertTrue(
-                dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_RELEASED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')),
+                dispatchKeyEvent(pluginKeyEvent(KeyEvent.KEY_RELEASED)),
             )
             assertEquals(2, calls)
             assertFalse(
-                dispatchKeyEvent(KeyEvent(canvas, KeyEvent.KEY_PRESSED, 0, primaryModifierMask, KeyEvent.VK_K, 'K')),
+                dispatchKeyEvent(pluginKeyEvent(KeyEvent.KEY_PRESSED)),
             )
         } finally {
             PluginShortcutRegistryImpl.unregister(provider.providerId)
         }
     }
+
+    private fun pluginKeyEvent(eventId: Int) = KeyEvent(canvas, eventId, 0, primaryModifierMask, KeyEvent.VK_K, 'K')
+
+    private fun shortcutProvider(
+        action: String,
+        onInvoke: () -> Unit,
+    ): ShortcutActionProvider =
+        object : ShortcutActionProvider {
+            override val providerId = "shortcut-review"
+
+            override fun shortcuts() =
+                listOf(
+                    PluginShortcutSpec(
+                        action,
+                        "Test shortcut",
+                        defaultBinding = KeyChordSpec("K", setOf("Cmd")),
+                    ),
+                )
+
+            override fun onAction(
+                actionId: String,
+                windowId: String?,
+            ) {
+                onInvoke()
+            }
+        }
 
     @Test
     fun `lost primary release cannot turn a later bare character into an action`() {

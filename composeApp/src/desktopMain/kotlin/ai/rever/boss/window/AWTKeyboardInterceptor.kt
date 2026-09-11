@@ -42,13 +42,7 @@ object AWTKeyboardInterceptor {
      */
     private val windowContextMap = ConcurrentHashMap<String, ShortcutContext>()
 
-    // Double-shift detection for global search (like IntelliJ's Search Everywhere)
-    private var lastShiftPressTime: Long = 0
-    private var lastShiftReleaseTime: Long = 0
-    private var shiftPressCount: Int = 0
-
-    // 500ms threshold follows accessibility guidelines for double-tap gestures (typically 500-800ms)
-    private const val DOUBLE_SHIFT_THRESHOLD_MS = 500
+    private val doubleShiftGesture = DoubleShiftGesture()
 
     // MRU tab-cycle tracking. Set when Ctrl+Tab starts a cycle in MRU mode, alongside the
     // physical keycode of the modifier sustaining it; the cycle commits only when THAT
@@ -60,9 +54,6 @@ object AWTKeyboardInterceptor {
     private var tabCycleModifierKeyCode = -1
     private var tabCycleWindowId: String? = null
     private val claimedKeys = ConcurrentHashMap.newKeySet<Int>()
-
-    // Minimum time shift must be released to count as a clean release (prevents false positives from held shift)
-    private const val MIN_SHIFT_RELEASE_MS = 50
 
     /**
      * A shortcut chord recognized on KEY_PRESSED and held until its primary key's matching
@@ -195,9 +186,7 @@ object AWTKeyboardInterceptor {
         }
         if (event.keyCode == KeyEvent.VK_SHIFT) return handleShiftEvent(event, windowId)
         if (event.id == KeyEvent.KEY_PRESSED && !isModifierOnlyKey(event.keyCode)) {
-            shiftPressCount = 0
-            lastShiftPressTime = 0
-            lastShiftReleaseTime = 0
+            doubleShiftGesture.reset()
         }
         val handled =
             when (event.id) {
@@ -213,35 +202,11 @@ object AWTKeyboardInterceptor {
         event: KeyEvent,
         windowId: String?,
     ): Boolean {
-        val now = System.currentTimeMillis()
-        var handled = false
-        when (event.id) {
-            KeyEvent.KEY_PRESSED -> {
-                val gap = now - lastShiftReleaseTime
-                if (gap in MIN_SHIFT_RELEASE_MS until DOUBLE_SHIFT_THRESHOLD_MS && shiftPressCount == 1) {
-                    shiftPressCount = 0
-                    lastShiftPressTime = 0
-                    lastShiftReleaseTime = 0
-                    if (windowId != null) {
-                        MenuActionsHandler.triggerOpenGlobalSearch(windowId)
-                        event.consume()
-                        handled = true
-                    }
-                } else {
-                    shiftPressCount = 1
-                    lastShiftPressTime = now
-                }
-            }
-
-            KeyEvent.KEY_RELEASED -> {
-                if (shiftPressCount == 1 && now - lastShiftPressTime < DOUBLE_SHIFT_THRESHOLD_MS) {
-                    lastShiftReleaseTime = now
-                } else {
-                    shiftPressCount = 0
-                }
-            }
-        }
-        return handled
+        val matched = doubleShiftGesture.handle(event.id, System.currentTimeMillis())
+        if (!matched || windowId == null) return false
+        MenuActionsHandler.triggerOpenGlobalSearch(windowId)
+        event.consume()
+        return true
     }
 
     private fun finishTabCycle() {
