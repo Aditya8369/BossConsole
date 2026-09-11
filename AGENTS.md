@@ -147,12 +147,10 @@ an update-shaped verb (or an intent parameter) on the api rather than a change t
 - **Optional dependencies are reported, flagged, not dropped.** An optional dependency is how a
   plugin says "this feature needs that plugin". Dropping them would leave this reporting
   nothing for the case it was built for.
-- **The event bus is a `Channel`, not a `SharedFlow`.** A broadcast would put the same dialog in
-  front of every open window and let each of them start the same install. The collector applies
-  back-pressure (`snapshotFlow { … }.first { it == null }`) so a second missing dependency is
-  asked about after the first rather than replacing it, and re-checks `isInstalled` before
-  showing - two dependents of one missing plugin each raise a prompt, so installing for the
-  first satisfies the second.
+- **The dependency bus retains pending prompts until atomically claimed.** Each eligible window
+  checks presence before claiming; cancellation during that check leaves the prompt pending.
+  Installed or declined prompts are also claimed and retired, so a later explicit retry can
+  reserve the key. A window waits for its current dialog to close before handling another prompt.
 - **Installing is the host's to do.** `PluginRepository.getPlugin(id)` plus `downloadPlugin`
   resolve an id to a jar, which no plugin can do - a plugin holding a null API can only send
   the user to the Toolbox to search by name.
@@ -242,13 +240,26 @@ Deliberately out of scope, so nobody assumes more than exists:
   `loadPlugin` refuses outright and `DefaultPlugin` skips on scan, so it looks missing to every
   manifest naming it) and the api plugin (whose install is an unload-all / swap / reload-all hot
   swap, not something to start from a dialog about something else).
-- **With two windows open, the window that asks may not be the one that reported.** The install
-  is still correct; the answering window may just not show the change until relaunch. See
-  `MissingDependencyPrompt`.
-- **The bus filters at report time, not only in the collector.** A prompt the collector is
-  certain to discard - declined, or a duplicate of one already waiting - still costs one of four
-  buffer slots on the way through, and that can be what refuses a different dependency which
-  could have been shown.
+- **Window routing is best-effort, not guaranteed delivery to the initiating window or manager.**
+  A prompt can carry a preferred window id (`MissingDependencyPrompt.windowId`, resolved from
+  focus at report time - it can differ from the window whose install actually found the missing
+  dependency, and a null target is unscoped by design). Delivery itself is a claim registry, not
+  a channel: `PluginDependencyBus.missingDependencies` broadcasts every pending prompt to every
+  open window each time anything changes (or once a second, as a fallback for the one case
+  nothing else wakes a collector for - the preferred window closing with no new report to
+  trigger a rescan), and each window decides independently, via `shouldClaimMissingDependencyPrompt`,
+  whether to `claim()` it. A non-target window that isn't the right audience simply leaves the
+  prompt where it is; there is no reoffer, no retry loop, and no per-rejection wait. When the
+  preferred window has closed, any other window may claim the prompt instead - and its installer
+  preserves its reporting manager while it is live and re-resolves to another live manager
+  after disposal (`MissingDependencyReporter.installerFor`). With none left, loading fails
+  explicitly. Each collecting window owns its periodic rescan, including while the queue is empty.
+  Closing a window after its dialog appears can still abandon that claimed prompt.
+- **The bus filters at report time, not only in the collector.** A prompt already declined this
+  session is dropped before it is ever admitted; a duplicate report for a key still pending keeps
+  the first reporter's prompt (and its `windowId`) rather than being replaced by the second. There
+  is no buffer to overflow - `pending` is a map with no capacity ceiling - so this is about not
+  re-asking a question already answered, not about conserving a scarce slot.
 - **A declined prompt is remembered for the session, not persisted, and keyed by kind.** "Not
   now" on an *optional* dependency is one answer about that plugin - three consumers declare the
   gateway optional, and being asked three times for one answer is what this prevents. "Skip" on a
@@ -341,9 +352,9 @@ installer factory), and it must not become an offer: the section falls back to t
 is composed inside the main window's subtree and opts *its own* dialogs out of heavyweight overlay
 routing precisely so they do not open centred on the main window - but the dependency dialog is
 raised through `PluginDependencyEventBus` and composed by `BossAppDialogs`, outside that opt-out. It
-is always-on-top so it is not lost, just not where the press happened. Routing it would mean the
-prompt carrying a window id, which is the same change `MissingDependencyPrompt` already records as
-not built for the two-window case.
+is always-on-top so it is not lost, just not where the press happened. The prompt now carries a
+best-effort BossWindow id, but Settings is not a registered BossWindow with its own dependency
+collector. Routing among BossWindows does not change this Settings placement limitation.
 
 **A raised offer is not a shown dialog.** `PluginDependencyEventBus.report` drops silently when a
 prompt for that plugin is already queued, so `offerIfMissing` returning true is not proof anything
@@ -1060,7 +1071,7 @@ nothing" was.
    plugins have not registered yet, and prompting there would be a false alarm on
    every launch, the same reason `WorkspaceApplier.awaitTabTypes` exists;
 3. only then raises a `MissingHandlerPluginPrompt` on `MissingHandlerPluginEventBus`,
-   whose delivery copies `PluginDependencyBus` deliberately: a `Channel` so exactly
+   which keeps unscoped delivery through a `Channel` so exactly
    one window asks, buffered so reporting never suspends the open, `trySend` so an
    overflow is refused and logged rather than silently dropped;
 4. waits again, up to five minutes, for the plugin to register. **The dialog has no

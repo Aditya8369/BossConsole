@@ -385,6 +385,10 @@ class DynamicPluginManager(
          */
         fun anyActiveManager(): DynamicPluginManager? = activeManagers().firstOrNull()
 
+        /** Keep a window-bound operation in its manager while that manager remains live. */
+        internal fun activeManagerOrFallback(preferred: DynamicPluginManager): DynamicPluginManager? =
+            activeManagers().let { managers -> managers.firstOrNull { it === preferred } ?: managers.firstOrNull() }
+
         /** Where [pluginId] was loaded from, per the first live manager that knows it. */
         fun jarPathOf(pluginId: String): String? =
             activeManagers()
