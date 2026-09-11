@@ -1,6 +1,6 @@
 # Out-of-Process (OOP) Plugin & IPC Architecture Guide
 
-This guide introduces the architecture, lifecycle, and IPC protocols for **Out-of-Process (OOP)** plugins within BOSS Console.
+This guide documents the architecture, lifecycle, IPC protocols, and step-by-step development workflow for building and running **Out-of-Process (OOP)** plugins within BOSS Console.
 
 > Review status: the build, manifest and standalone-launch recipes below still need an executable integration fixture. The widget example is a local model only, not a complete loadable plugin. Do not treat this draft as a validated step-by-step setup guide.
 
@@ -18,22 +18,22 @@ BOSS Console supports two execution models for plugins:
 | **Classpath Separation** | Potential dependency conflicts with host | Separate child classpath/JVM arguments, plus host-loaded plugin classes |
 | **Security / Sandbox** | Shares host memory address space | Separate address space; same OS user, with service-specific IPC checks |
 
-The current `DynamicPluginManager` loads and registers the plugin in the host even on its OOP branch, then starts the child for state management. Declaring OOP therefore does not mean no plugin code executes in the host. Remote widget surfaces are a separate explicit registration path. When no spawner is available, the manager falls back to in-process loading; this is not controlled by the sample manifest's `fallback` key.
+The current `DynamicPluginManager` loads and registers the plugin in the host even on its OOP branch, then starts the child for state management. Declaring OOP therefore does not mean no plugin code executes in the host. Remote widget surfaces are a separate explicit registration path. When no spawner is available, the manager falls back to in-process loading; this is not controlled by any manifest key in the sample below.
 
-### Microkernel Host Components
-- **`boss-ipc`**: Core Protocol Buffer definitions (`boss.ipc.v1`) and gRPC channel abstraction layer.
-- **`boss-process-manager`**: Manages process lifecycle (`ProcessSpawner`, `ProcessRegistry`, restart policies).
-- **`boss-orchestrator`**: Orchestrates service discovery, capability routing, and IPC event dispatching.
-- **`boss-ui-sdk`**: Provides the remote widget tree declarative DSL, diff engine (`WidgetDiffEngine`), proto converters, and event mappings for headless child processes.
+### Microkernel Host & IPC Modules
+- **`:boss-ipc`**: Core Protocol Buffer definitions (`boss.ipc.v1`), gRPC channel/server abstraction layer (`BossIpcClient`, `BossIpcServer`), child process bootstrapper (`ChildProcessBootstrap`), and process authentication interceptors.
+- **`:boss-process-manager`**: Manages process lifecycle (`ProcessSpawner`, `ProcessRegistry`, restart policies, health checks).
+- **`:boss-orchestrator`**: Orchestrates service discovery, capability routing, and IPC event dispatching.
+- **`:boss-ui-sdk`**: Declarative remote widget tree DSL (`widgetTree`), diff engine (`WidgetDiffEngine`), protobuf converters (`WidgetProtoConverter`), and event mappings (`UIEventMapper`, `WidgetEvent`).
 - **`OutOfProcessPluginSpawnerImpl`**: Host-side component responsible for launching, monitoring, handshaking, and tearing down plugin child processes.
 - **`PluginUIServiceBridge`**: Kernel-side service implementing `PluginUIService` that receives streamed virtual widget trees and routes Compose user interactions back to child processes.
-- **`boss-microkernel-runtime`**: Upstream standalone runtime JAR containing plugin state runners and dispatchers.
+- **`boss-microkernel-runtime`**: Upstream standalone runtime JAR (separate repository, not a BossConsole Gradle subproject) containing plugin state runners and dispatchers.
 
 ---
 
 ## 2. IPC Protocol & Communication Model
 
-OOP plugins communicate with the BOSS Console host over local gRPC transport using Protocol Buffers defined in `:boss-ipc` under `boss.ipc.v1`.
+OOP plugins communicate with the BOSS Console host over local gRPC transport using Protocol Buffers defined in `:boss-ipc` under package `boss.ipc.v1` (Java package `ai.rever.boss.ipc.proto`).
 
 ```mermaid
 graph LR
@@ -70,9 +70,11 @@ graph LR
    - Plugin calls `RegisterUI` with initial `WidgetTree` layout and metadata.
    - Plugin opens bidirectional `StreamUI` call: streams `WidgetUpdate` (full tree or incremental `WidgetPatch`) to Kernel, and reads incoming `UIEvent` (clicks, text input, checkbox toggles, keystrokes) streamed from Kernel Compose UI.
 
-3. **`PluginUIService` (`ui_protocol.proto`)**:
-   - Streams virtual widget trees and incremental patches (`WidgetDiff`, `WidgetDiffEngine`).
-   - Routes user interactions (clicks, text input, scroll events) back to the plugin process.
+3. **`PluginStateService` (`plugin_state.proto`)** *(Hosted by Child Plugin Process)*:
+   - Child process runs local `BossIpcServer` on `BOSS_IPC_ADDR`.
+   - Host `PluginStateBridge` connects as client.
+   - Supports bidirectional `SyncState` (host sends `PluginIntentEnvelope`, child sends `PluginStateUpdate` with snapshots or JSON Merge Patch deltas `PluginStateDelta`).
+   - Supports `GetCurrentState` for reconnection recovery.
 
 4. **`EventBusService` (`event_bus.proto`)**:
    - Enables publish-subscribe messaging across plugins and host subsystems.
@@ -92,11 +94,14 @@ sequenceDiagram
     participant Host as Host (OutOfProcessPluginSpawnerImpl)
     participant Kernel as Kernel Registry & UIService
     participant Child as Plugin Child Process
-
-    Host->>Child: Spawn JVM process (PluginProcessMainKt)
-    Child->>Kernel: Connect & Register (RegisterProcessRequest)
-    Host->>Kernel: Wait for child readiness (startupTimeoutMs)
-    Host->>Child: Establish gRPC Channel & Init PluginStateBridge
+    
+    Host->>Child: Spawn JVM process (passes BOSS_KERNEL_IPC_ADDR, BOSS_IPC_ADDR, BOSS_PROCESS_TOKEN, etc.)
+    Child->>Kernel: Connect & Register (KernelService.RegisterProcess)
+    Child->>Kernel: Start Heartbeat Stream (KernelService.heartbeat)
+    Child->>Child: Start local gRPC server on BOSS_IPC_ADDR (PluginStateService)
+    Child->>Kernel: Optional: register UI surface & Stream UI (explicit remote widget surface)
+    Host->>Kernel: Wait for child readiness in ProcessRegistry (startupTimeoutMs)
+    Host->>Child: Connect PluginStateBridge to child BOSS_IPC_ADDR
     loop Every heartbeatIntervalMs
         Child->>Kernel: HeartbeatPing (metrics: memory, threads, uptime)
         Kernel-->>Child: HeartbeatPong
@@ -108,11 +113,12 @@ sequenceDiagram
 ```
 
 ### Lifecycle Stages
-1. **Spawn**: `OutOfProcessPluginSpawnerImpl.spawn()` builds the classpath (`runtimeClasspath` + `pluginJar` + `apiJar`), prepares the `ProcessConfig`, and executes the child process via `ProcessSpawner`.
-2. **Registration Handshake**: The child connects back to the kernel via `BOSS_KERNEL_IPC_ADDR` and registers its process ID and IPC listening address.
-3. **Readiness Gate**: Host awaits child registration up to `startupTimeoutMs` (default: 30s). If timeout expires, `cleanupFailedSpawn` forcibly kills the orphaned child. Registration occurs before runtime state-holder initialization, so it is not proof that state sync or UI is usable. The manager launches spawning in the background and logs a failure while the plugin can remain `LOADED`. Current dev scopes process IDs by window and uses the process ID as the state instance ID; plugin identity remains separate.
+1. **Spawn**: `OutOfProcessPluginSpawnerImpl.spawn()` builds the classpath (`runtimeClasspath` + `jarPath` + the resolved API JAR), sets JVM flags (heap bounds, `-Dboss.api.version`), passes environment variables, and launches via `ProcessSpawner`.
+2. **Registration Handshake**: `ChildProcessBootstrap` in the child connects to `BOSS_KERNEL_IPC_ADDR` with `BOSS_PROCESS_TOKEN` authentication metadata, registers process ID and IPC listening address via `KernelService.RegisterProcess`.
+3. **Readiness Gate**: Host awaits child registration up to `startupTimeoutMs` (default: 30s). If the timeout expires, `cleanupFailedSpawn` forcibly kills the orphaned child. Registration occurs before runtime state-holder initialization, so it is not proof that state sync or UI is usable. The manager launches spawning in the background and logs a failure while the plugin can remain `LOADED`. Current dev scopes process IDs by window and uses the process ID as the state instance ID; plugin identity remains separate.
 4. **Heartbeat & Monitoring**: The host config defaults `heartbeatIntervalMs` to 5s. Plugin children are excluded from the global health supervisor, so `RestartPolicy.ON_FAILURE` and `maxRestartAttempts` do not imply automatic plugin restart. See `KernelBootstrap` and the plugin-specific monitoring/recovery path. The standalone runtime currently advertises its own fixed 5s heartbeat and 30s startup contract.
-5. **Teardown**: Host shuts down gRPC channels gracefully (with 3-second fallback to `shutdownNow`), disposes state bridges, and terminates the child process.
+5. **UI & State Binding**: A plugin that wants host-rendered remote UI registers its surface on the Kernel `PluginUIService` and starts streaming widgets; the host connects `PluginStateBridge` to the child's `PluginStateService` on `BOSS_IPC_ADDR` for intents and state sync.
+6. **Teardown**: Host shuts down state bridge, closes gRPC channels (graceful 3-second wait, then `shutdownNow`), signals child termination (5-second graceful exit before `destroyForcibly`), and unregisters from `ProcessRegistry`.
 
 ---
 
@@ -134,8 +140,6 @@ Declare `"isolationMode": "out-of-process"` in your plugin's `plugin.json`:
   "description": "Demonstrates out-of-process plugin capabilities",
 
   "isolationMode": "out-of-process",
-  "fallback": "in-process",
-  "stateHolderClass": "ai.rever.boss.plugin.sample.SampleStateHolder",
 
   "sandbox": {
     "maxThreads": 4,
@@ -149,8 +153,9 @@ Declare `"isolationMode": "out-of-process"` in your plugin's `plugin.json`:
   },
 
   "panel": {
-    "defaultSlot": "left.top.bottom",
-    "iconName": "extension"
+    "location": "left.top.bottom",
+    "icon": "extension",
+    "order": 100
   },
 
   "isDynamic": true,
@@ -159,9 +164,15 @@ Declare `"isolationMode": "out-of-process"` in your plugin's `plugin.json`:
 }
 ```
 
+Notes on the manifest:
+
+- The host parses `plugin.json` with `ignoreUnknownKeys = true`: unknown keys are silently ignored, not an error.
+- There is no `fallback` manifest key and no `stateHolderClass` manifest key. When no spawner is available, `DynamicPluginManager` decides on in-process fallback on its own.
+- `panel` uses `location` (`side.slot.position`), `icon` (Material icon name), `order`, `panelId`, and `displayName`. Keys such as `defaultSlot` or `iconName` are ignored.
+
 ### Step 2: Build Configuration (`build.gradle.kts`)
 
-The packaging sketch below is not currently runnable: `boss-microkernel-runtime` is a standalone repository, not a BossConsole Gradle subproject. A complete recipe must resolve matching runtime and contract artifacts and package the plugin manifest at `META-INF/boss-plugin/plugin.json`. Keep the API version aligned with the host pin in `gradle/libs.versions.toml`; do not substitute an old API JAR. The child classpath is runtime JAR, plugin JAR, then the resolved API JAR.
+OOP plugins are packaged as fat shadow JARs containing the plugin code and its private dependencies, while referencing API and IPC interfaces provided by the host environment:
 
 ```kotlin
 plugins {
@@ -182,9 +193,8 @@ java {
 dependencies {
     // Plugin API and IPC definitions (provided at runtime by host - do not bundle)
     compileOnly(project(":plugin-platform:plugin-api-core"))
-    compileOnly(project(":boss-microkernel-runtime"))
-    compileOnly(project(":boss-ui-sdk"))
     compileOnly(project(":boss-ipc"))
+    compileOnly(project(":boss-ui-sdk"))
 
     // Plugin-specific dependencies
     implementation(libs.kotlinx.coroutines.core)
@@ -209,57 +219,58 @@ tasks.shadowJar {
 }
 ```
 
-> **Note on Gradle Module Paths**: When building inside the BOSS Console repository, microkernel modules live in `modules/` but use flat Gradle project paths: `:boss-ipc` and `:boss-ui-sdk` (not `:modules:boss-ipc`).
+> **Note on Gradle Module Paths**: When building inside the BOSS Console repository, microkernel modules live in `modules/` but use flat Gradle project paths: `:boss-ipc` and `:boss-ui-sdk` (not `:modules:boss-ipc`). `boss-microkernel-runtime` is a standalone repository, not a BossConsole Gradle subproject: a complete recipe must resolve a matching runtime and contract artifact for the child classpath (runtime JAR, plugin JAR, then the resolved API JAR) and package the plugin manifest at `META-INF/boss-plugin/plugin.json`. Keep the API version aligned with the host pin in `gradle/libs.versions.toml`; do not substitute an old API JAR. A ready-to-copy variant lives in [`plugin-oop-template/build.gradle.kts.template`](plugin-oop-template/build.gradle.kts.template).
 
 ### Step 3: Implementing State & Remote UI (`boss-ui-sdk`)
 
-The following is a pure widget-model example using the actual `boss-ui-sdk` API, not a loadable runtime state holder. It does not satisfy `stateHolderClass`: the runtime requires a `CoroutineScope` constructor (optionally also `RemotePluginContext`) and only wires state sync for a `PluginStateHolder` subclass. A complete integration must also supply serialization/intent handling and explicit surface registration.
+Out-of-process plugins construct remote UI trees using the declarative `widgetTree` DSL in `boss-ui-sdk`:
 
 ```kotlin
 package ai.rever.boss.plugin.sample
 
-import ai.rever.boss.ui.sdk.WidgetTree
-import ai.rever.boss.ui.sdk.widgetTree
 import ai.rever.boss.ui.sdk.WidgetEvent
 import ai.rever.boss.ui.sdk.WidgetTree
 import ai.rever.boss.ui.sdk.widgetTree
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class SampleUiState(
-    val counter: Int = 0,
-    val statusText: String = "Ready"
-)
 
 class SampleStateHolder {
-    private val _state = MutableStateFlow(SampleUiState())
-    val state: StateFlow<SampleUiState> = _state.asStateFlow()
+    private val _counter = MutableStateFlow(0)
+    private val _status = MutableStateFlow("Ready")
+    val counter: StateFlow<Int> = _counter
+    val statusText: StateFlow<String> = _status
 
     fun increment() {
-        val current = _state.value
-        _state.value = current.copy(
-            counter = current.counter + 1,
-            statusText = "Incremented at ${System.currentTimeMillis()}"
-        )
+        _counter.value++
+        _status.value = "Incremented"
     }
 
     fun handleEvent(event: WidgetEvent) {
-        if (event is WidgetEvent.Click && event.eventId == "btn_increment") {
-            increment()
+        when (event) {
+            is WidgetEvent.Click -> {
+                when (event.eventId) {
+                    "btn_increment" -> increment()
+                }
+            }
+            is WidgetEvent.TextChange -> {
+                _status.value = event.newValue
+            }
+            else -> Unit
         }
     }
 
     fun renderUI(): WidgetTree = widgetTree {
         column {
             text("Counter: ${_counter.value}")
+            text("Status: ${_status.value}")
             button(label = "Increment Counter", onClickEvent = "btn_increment")
         }
     }
 }
 ```
+
+The example above is a pure widget-model sketch: it does not satisfy the runtime's state-holder contract, which requires a `CoroutineScope` constructor (optionally also `RemotePluginContext`) and only wires state sync for a `PluginStateHolder` subclass. A complete integration must also supply serialization/intent handling and explicit surface registration.
 
 `WidgetDiffEngine.diff` computes local `DiffOperation` values; it does not transmit them. Plugin code must register a surface through the runtime client, convert the tree or diff to protobuf, send updates, collect UI events, and dispose the surface. `PluginUIService` is served by the host; the child calls `RegisterUI` and then `StreamUI`, sending `WidgetUpdate` values and receiving `UIEvent` values on that stream. Reconnection requires registration again. Key events additionally require the surface registration to opt into `wants_keys`.
 
@@ -275,32 +286,70 @@ class SampleStateHolder {
 
 ## 6. Debugging & Local Testing
 
-### Standalone Process Execution
-The command below is incomplete and must not be used as a standalone setup recipe. `ChildProcessBootstrap` also requires process identity and a child address (or the process type from which to resolve it), and authenticated remote UI needs a host-minted process token. `PluginProcessMain` requires `BOSS_PLUGIN_CLASSPATH`. A future fixture should supply these through a test host; do not copy or log credentials from a running host. Classpath separators are `:` on macOS/Linux and `;` on Windows.
+### Required Launch Parameters & Environment Variables
 
-Original sketch awaiting that fixture:
-1. Launch BOSS Console with debug logging enabled (`-Dlogback.configurationFile=logback-debug.xml`).
-2. Run the plugin process with standard JVM debugging arguments:
-   ```bash
-   java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 \
-        -cp "runtime.jar;plugin.jar" \
-        ai.rever.boss.plugin.runtime.PluginProcessMainKt
-   ```
-3. Pass `BOSS_KERNEL_IPC_ADDR=localhost:<port>` and `BOSS_PLUGIN_ID=<id>` as environment variables.
+When running or debugging an OOP plugin process (either spawned by host or executed independently):
+
+| Variable / Parameter | Type | Description |
+|---|---|---|
+| `BOSS_PROCESS_ID` | Env Var | Unique identifier for the process (e.g. `plugin-sample-oop-plugin`) |
+| `BOSS_PROCESS_TYPE` | Env Var | Process type enum (`PLUGIN` or `SERVICE`) |
+| `BOSS_KERNEL_IPC_ADDR` | Env Var | Host kernel gRPC listening address (e.g. `localhost:50051` or domain socket) |
+| `BOSS_IPC_ADDR` | Env Var | Child process's own gRPC server bind address (e.g. `localhost:50052`) |
+| `BOSS_PLUGIN_CLASSPATH` | Env Var | Path to the plugin's fat shadow JAR |
+| `BOSS_PROCESS_TOKEN` | Env Var | IPC security token minted by the host kernel (required for authenticated remote UI) |
+| `BOSS_PROJECT_PATH` | Env Var | Active project root directory |
+| `BOSS_WINDOW_ID` | Env Var | ID of the host window hosting the panel/tab |
+| `-Dboss.api.version` | JVM Arg | Target API version (e.g. `-Dboss.api.version=1.0.0`) |
+| `-Xmx512m -Xms64m` | JVM Arg | Process heap allocation bounds |
+
+### Standalone Process Execution Example
+
+The command below is a sketch, not a validated standalone recipe: `ChildProcessBootstrap` additionally requires process identity and a child address (or the process type from which to resolve it), and authenticated remote UI needs a host-minted `BOSS_PROCESS_TOKEN`. A future fixture should supply these through a test host; do not copy or log credentials from a running host. Classpath separators are `:` on macOS/Linux and `;` on Windows.
+
+```bash
+# Set required environment variables
+export BOSS_PROCESS_ID="plugin-sample-oop-plugin"
+export BOSS_PROCESS_TYPE="PLUGIN"
+export BOSS_KERNEL_IPC_ADDR="localhost:50051"
+export BOSS_IPC_ADDR="localhost:50052"
+export BOSS_PLUGIN_CLASSPATH="/path/to/sample-oop-plugin-all.jar"
+
+# Launch JVM with JDWP debugging enabled
+java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005 \
+     -Dboss.api.version=1.0.0 \
+     -Xms64m -Xmx512m \
+     -cp "boss-microkernel-runtime-all.jar:sample-oop-plugin-all.jar" \
+     ai.rever.boss.plugin.runtime.PluginProcessMainKt
+```
+
+### Unit Testing Remote Widgets & Diff Engine
 
 Use `WidgetDiffEngine` directly in unit tests to assert UI tree generation and diff delta calculations without spinning up a gRPC server:
 
 ```kotlin
-@Test
-fun testWidgetTreeGeneration() {
-    val stateHolder = SampleStateHolder()
-    val initialTree = stateHolder.renderUI()
+class SampleStateHolderTest {
+    @Test
+    fun testWidgetTreeGenerationAndDiff() {
+        val stateHolder = SampleStateHolder()
+        val initialTree = stateHolder.renderUI()
 
-    stateHolder.increment()
-    val updatedTree = stateHolder.renderUI()
+        // column + 2 text nodes + button = 4 total
+        assertEquals(4, initialTree.nodes.size)
+        val root = initialTree.nodes[initialTree.rootId]!!
+        assertEquals(WidgetType.COLUMN, root.type)
 
-    val patches = WidgetDiffEngine.diff(initialTree, updatedTree)
-    assertTrue(patches.isNotEmpty())
+        // Trigger action via WidgetEvent
+        stateHolder.handleEvent(WidgetEvent.Click(eventId = "btn_increment"))
+        val updatedTree = stateHolder.renderUI()
+
+        // Calculate diff operations
+        val diffOps = WidgetDiffEngine.diff(old = initialTree, new = updatedTree)
+        assertTrue(diffOps.isNotEmpty(), "Diff should contain property updates for changed text")
+
+        val hasUpdatedNode = diffOps.any { it is DiffOperation.NodeUpdated }
+        assertTrue(hasUpdatedNode, "Expected NodeUpdated operation for counter text change")
+    }
 }
 ```
 
