@@ -36,15 +36,29 @@ class CliBootstrapTest {
         val attempted = mutableListOf<String>()
         val links = arrayOf("https://one.example", "https://two.example", "https://three.example")
         val result =
-            CliBootstrap.forwardToExistingInstance(links, maxRetries = 1) { link, origin ->
+            CliBootstrap.forwardToExistingInstance(links) { link, origin ->
                 assertEquals(ai.rever.boss.utils.DeepLinkOrigin.EXTERNAL, origin)
                 attempted.add(link)
-                attempted.size != 1
+                false
             }
         assertFalse(result)
-        assertEquals(3, attempted.size)
-        assertTrue(attempted[0].contains("one.example"))
-        assertTrue(attempted[2].contains("three.example"))
+        // Non-action open requests use the startup retry policy: every link is
+        // attempted the full number of times and no link is skipped.
+        assertEquals(9, attempted.size)
+        assertTrue(links.all { attempted.count { a -> a == it } == 3 })
+    }
+
+    @Test
+    fun actionLinksAreForwardedWithoutReplay() {
+        val attempted = mutableListOf<String>()
+        val actionLink = "boss://plugin/test-plugin?action=open"
+        val result =
+            CliBootstrap.forwardToExistingInstance(arrayOf(actionLink)) { link, _ ->
+                attempted.add(link)
+                false
+            }
+        assertFalse(result)
+        assertEquals(1, attempted.size)
     }
 
     @Test

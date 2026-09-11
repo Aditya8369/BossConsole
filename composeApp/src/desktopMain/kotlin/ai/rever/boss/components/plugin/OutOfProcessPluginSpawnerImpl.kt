@@ -238,7 +238,8 @@ class OutOfProcessPluginSpawnerImpl(
                     .processDescendants(process?.process),
             )
         runCatching { process?.destroyForcibly() }
-        process?.let { kernelRegistry()?.unregisterIfSame(it.config.processId, it) }
+        awaitForcedExit(process)
+        process?.takeUnless { it.isAlive }?.let { kernelRegistry()?.unregisterIfSame(it.config.processId, it) }
     }
 
     override suspend fun terminate(pluginId: String): Result<Unit> =
@@ -296,7 +297,10 @@ class OutOfProcessPluginSpawnerImpl(
                 // implies reapable" has to hold for as long as the child is alive, so a host exit
                 // part-way through an unload still reaps it; and removing by id alone could evict
                 // a replacement that a concurrent respawn had already registered.
-                process?.let { kernelRegistry()?.unregisterIfSame(it.config.processId, it) }
+                awaitForcedExit(process)
+                process?.takeUnless { it.isAlive }?.let {
+                    kernelRegistry()?.unregisterIfSame(it.config.processId, it)
+                }
             }
         }
 

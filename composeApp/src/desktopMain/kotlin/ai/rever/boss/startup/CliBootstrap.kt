@@ -8,6 +8,7 @@ import ai.rever.boss.utils.DeepLinkOrigin
 import ai.rever.boss.utils.OsOpenArguments
 import ai.rever.boss.utils.SingleInstanceManager
 import ai.rever.boss.utils.WindowsProtocolHandler
+import ai.rever.boss.utils.forwardDeepLinkWithRetry
 import ai.rever.boss.utils.logging.BossLogger
 import ai.rever.boss.utils.logging.LogCategory
 import com.github.ajalt.clikt.core.ProgramResult
@@ -94,7 +95,6 @@ object CliBootstrap {
      */
     fun forwardToExistingInstance(
         args: Array<String>,
-        maxRetries: Int = 3,
         send: (String, DeepLinkOrigin) -> Boolean = { link, origin ->
             SingleInstanceManager.sendToExistingInstance(link, origin)
         },
@@ -111,44 +111,39 @@ object CliBootstrap {
             mapOf("count" to deepLinks.size),
         )
 
-        fun forward(link: String): Boolean {
-            for (attempt in 1..maxRetries) {
-                if (send(link, DeepLinkOrigin.EXTERNAL)) {
-                    logger.info(LogCategory.SYSTEM, "URL sent successfully", mapOf("attempt" to attempt))
-                    return true
-                }
-                logger.warn(
-                    LogCategory.SYSTEM,
-                    "Failed to send URL",
-                    mapOf(
-                        "attempt" to attempt,
-                        "maxRetries" to maxRetries,
-                    ),
-                )
-                if (attempt < maxRetries) {
-                    runBlocking {
-                        delay(500)
-                    }
-                }
+        // Every link is attempted, and success means every one landed.
+        // `fold` rather than `all`, which would short-circuit and silently
+        // drop the rest of a multi-file selection after one failure. Per-link
+        // retries follow forwardDeepLinkWithRetry's policy: action links are
+        // never replayed, other open requests retry like auth callbacks.
+        // runBlocking is acceptable here: this runs during pre-UI
+        // initialization, before the Compose application starts.
+        val success =
+            deepLinks.fold(true) { acc, link ->
+                // Forward first, combine after: `acc &&` would short-circuit and
+                // silently drop the rest of a multi-file selection after one failure.
+                forwardDeepLinkWithRetry(
+                    link = link,
+                    send = { attempt ->
+                        val accepted = send(link, DeepLinkOrigin.EXTERNAL)
+                        if (!accepted) {
+                            logger.warn(LogCategory.SYSTEM, "Failed to send URL", mapOf("attempt" to attempt))
+                        }
+                        accepted
+                    },
+                    pause = { runBlocking { delay(500) } },
+                ) && acc
             }
-            return false
-        }
 
-        // Do not use all(): a failed send must not skip the rest of a multi-file selection.
-        val success = deepLinks.fold(true) { acc, link -> forward(link) && acc }
         if (!success) {
             logger.error(
                 LogCategory.SYSTEM,
                 "Could not send URL to existing instance after retries",
-                mapOf("maxRetries" to maxRetries),
             )
         }
         return success
     }
 
-    /**
-     * Dispatches CLI arguments after the single-instance lock has been acquired.
-     */
     @Suppress("TooGenericExceptionCaught")
     fun dispatchPostLock(args: Array<String>) {
         if (args.isNotEmpty()) {

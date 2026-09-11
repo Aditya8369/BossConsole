@@ -449,15 +449,15 @@ MACOS_DEVELOPER_ID=Developer ID Application: ...  # Optional, signs local packag
 **Priority**: Environment variables > System properties > local.properties > Embedded build config.
 For `BOSS_MODE` only, the `env_vars` file is consulted between system properties and
 local.properties. Reader and settings writers use `BossDirectories.resolve("env_vars")`;
-`BOSS_DATA_DIR` does not redirect this preferences file. This is the process-mode menu's plain, unquoted `KEY=value` format
-(no shell `export` syntax); other keys in that file cannot override host configuration.
-`BOSS_MODE` is normalized to trimmed uppercase by ConfigLoader; runtime plugin gates must
-use that resolver rather than prefixing a raw getenv lookup. Nonblank environment/system
-property overrides own the setting, so the UI shows their source and disables the saved toggle.
-Disabling writes explicit `BOSS_MODE=MONOLITH`, which outranks local/embedded defaults.
-Settings reread next-launch preferences after each successful save across windows; the
-runtime snapshot must not be reloaded before restart. Builds without kernel classes show
-the mode as unavailable. Atomic preference writes preserve existing POSIX permissions.
+`BOSS_DATA_DIR` does not redirect this preferences file. The file uses the process-mode
+menu's plain, unquoted `KEY=value` format (no shell `export` syntax); other keys in that
+file cannot override host configuration. `BOSS_MODE` is normalized to trimmed uppercase
+by ConfigLoader; runtime plugin gates must use that resolver rather than prefixing a raw
+getenv lookup. Nonblank environment or system property values override the saved file at
+every resolution tier. The ConfigLoader snapshot reads the file once per process, so a
+mode change applies on the next launch; the settings surfaces share one published save
+state within the running process. Atomic preference writes preserve existing POSIX
+permissions.
 
 ### Credential brokers
 

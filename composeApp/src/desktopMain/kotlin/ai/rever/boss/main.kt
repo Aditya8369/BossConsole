@@ -309,70 +309,11 @@ fun main(args: Array<String>) {
             null
         }
 
-    // Single-instance check: ensure only one BOSS instance runs
-    // On Windows, this prevents multiple windows when clicking deep links
-    if (!SingleInstanceManager.acquireLock()) {
-        logger.info(LogCategory.SYSTEM, "Another BOSS instance is already running")
-
-        // Everything the OS is asking this launch to open, as `boss://` links.
-        // File paths count, not only URL schemes: on Windows and Linux a
-        // double-clicked file arrives as a path in argv, and this branch used to
-        // ignore it and exit 0 with "No URL to send", so the file never opened
-        // while BOSS was running. See OsOpenArguments.
-        val deepLinks = OsOpenArguments.deepLinksFrom(args)
-
-        if (deepLinks.isNotEmpty()) {
-            logger.info(
-                LogCategory.SYSTEM,
-                "Sending open requests to existing instance",
-                mapOf("count" to deepLinks.size),
-            )
-
-            // The origin is stated, not assumed: a `boss://` argument in this
-            // process's argv is how the OS protocol handler delivers a URL
-            // somebody asked it to open, so it is forwarded as external. The
-            // running instance takes that label rather than inferring anything
-            // from the fact that this process could present the channel token.
-
-            // Try to send with retry logic (important for auth deep links during sign-in)
-            // Note: runBlocking is acceptable here as this runs during pre-UI initialization,
-            // before the Compose application starts. No UI thread exists yet to block.
-            fun forward(link: String): Boolean =
-                ai.rever.boss.utils.forwardDeepLinkWithRetry(
-                    link = link,
-                    send = { attempt ->
-                        val accepted = SingleInstanceManager.sendToExistingInstance(link, DeepLinkOrigin.EXTERNAL)
-                        logger.info(
-                            LogCategory.SYSTEM,
-                            "Open request forwarding completed",
-                            mapOf("attempt" to attempt, "accepted" to accepted),
-                        )
-                        accepted
-                    },
-                    pause = { kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(500) } },
-                )
-
-            // Every link is attempted, and success means every one landed.
-            // `fold` rather than `all`, which would short-circuit and silently
-            // drop the rest of a multi-file selection after one failure.
-            val success = deepLinks.fold(true) { acc, link -> forward(link) && acc }
-
-            if (success) {
-                exitProcess(0)
-            } else {
-                // Forwarding failed or the action did not report success - DO NOT create a new window.
-                // This prevents duplicate windows during sign-in
-                logger.error(
-                    LogCategory.SYSTEM,
-                    "An open request did not report success in the existing instance",
-                )
-                exitProcess(1)
-            }
-        } else {
-            logger.info(LogCategory.SYSTEM, "No URL to send - existing BOSS window should be visible")
-            exitProcess(0)
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Phase 5: Shutdown hook registration
+    // -------------------------------------------------------------------------
+    ShutdownSequence.register { kernelBootstrap }
+    logger.info(LogCategory.SYSTEM, "Successfully acquired single-instance lock")
 
     // -------------------------------------------------------------------------
     // Phase 6: Overlays, window nets & Chromium engine preparation

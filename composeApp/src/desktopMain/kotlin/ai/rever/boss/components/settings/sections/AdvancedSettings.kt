@@ -71,8 +71,7 @@ fun AdvancedSettings() {
                         applyMicrokernelMode(enabled)
                     }
                 },
-                enabled = modeLoaded && modeOverride == null && modeAvailable,
-                description = processModeDescription(modeLoaded, modeAvailable, modeOverride),
+                description = "Run plugins in isolated processes with gRPC IPC and AI self-healing",
             )
 
             if (saveError || readError) {
@@ -123,13 +122,13 @@ fun AdvancedSettings() {
             }
         }
 
-        // Always shown after mode loading, including with Microkernel Mode off: this is where source egress is turned
+        // Always shown, including with Microkernel Mode off: this is where source egress is turned
         // on, and an operator should be able to read and set it before enabling the mode that runs
         // it. The readiness card says when the mode is what's holding it back.
-        if (modeLoaded) SelfHealingSettings(kernelMode = initialMode && modeAvailable)
+        SelfHealingSettings(kernelMode = kernelMode)
 
         // Plugin JVM Settings (only visible in KERNEL mode)
-        if (modeLoaded && initialMode && modeAvailable) {
+        if (kernelMode) {
             val perfSettings by PerformanceSettingsManager.currentSettings.collectAsState()
             var pluginHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmHeapMb.toFloat()) }
             var pluginInitHeap by remember(perfSettings) { mutableStateOf(perfSettings.pluginJvmInitialHeapMb.toFloat()) }

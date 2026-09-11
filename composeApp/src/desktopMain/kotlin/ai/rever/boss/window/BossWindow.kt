@@ -59,7 +59,6 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.Color
@@ -1439,25 +1438,3 @@ fun ApplicationScope.BossWindow(
 fun BossWindowState.updateTitle(newTitle: String) {
     this.title = newTitle
 }
-
-/**
- * Resolves the menu item label for Microkernel Mode in the main application menu.
- *
- * Restart requirement outranks a retained local save failure so that an update saved in
- * Settings or another window is never masked by a previous failure in this menu.
- */
-internal fun microkernelMenuLabel(
-    loaded: Boolean,
-    available: Boolean,
-    overrideSource: String?,
-    restartRequired: Boolean,
-    saveFailed: Boolean,
-): String =
-    when {
-        !loaded -> "Microkernel Mode (loading)"
-        !available -> "Microkernel Mode (unavailable)"
-        overrideSource != null -> "Microkernel Mode (externally controlled)"
-        restartRequired -> "Microkernel Mode (restart required)"
-        saveFailed -> "Microkernel Mode (save failed)"
-        else -> "Microkernel Mode"
-    }
